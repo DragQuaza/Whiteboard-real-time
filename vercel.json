@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "public": true,
+  "cleanUrls": true,
+  "rewrites": [
+    { "source": "/room/(.*)", "destination": "/index.html" },
+    { "source": "/(.*)", "destination": "/$1" }
+  ],
+  "redirects": [
+    { "source": "/room", "destination": "/", "permanent": false }
+  ]
+}

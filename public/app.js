@@ -1,4 +1,6 @@
-const SERVER_URL = 'http://localhost:5001';
+const SERVER_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
+    ? 'http://localhost:5001' 
+    : 'https://whiteboard-real-time-one.onrender.com'; // Fallback to Render URL
 
 let socket = null;
 let roomId = null;
