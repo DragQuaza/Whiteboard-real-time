@@ -2,14 +2,23 @@
 node_modules/
 **/node_modules/
 
+# Next.js
+.next/
+out/
+
 # Logs
 *.log
-backend/*.log
-frontend/*.log
 
 # OS files
 .DS_Store
 
+# Environment
+.env
+.env.local
+server/.env
+
 # Build outputs
-frontend/dist/
-frontend/dist-ssr/
+build/
+
+# Firebase Cache
+.firebase/

@@ -1,58 +1,70 @@
-# SyncBoard - Real-time Collaborative Whiteboard
+   # RealTimeBoard
 
-A production-minded MVP for a real-time collaborative whiteboard built with React, Node.js, and Socket.io.
+   
+A Real-Time Collaborative Whiteboard Web App built with NextJs.
+---
+## Features
+* Share canvas in real-time easily just by sharing a link.
+* Chat with people in the room.
+* Own file extension .ink Save the drawing files locally on your device.
 
-## 🚀 Live Demo
-- **Open Whiteboard**: [https://whiteboard-real-time-one.vercel.app](https://whiteboard-real-time-one.vercel.app)
+---
+## ScreenShots
+Coming soon...
 
-## 🛠 Technical Infrastructure
-For recruiters and developers interested in the deployment architecture:
-- **Frontend Hosting**: [Vercel](https://vercel.com) (Continuous Deployment from GitHub)
-- **Backend Hosting**: [Render](https://render.com) (Persistent Node.js Instance)
-- **Real-time Engine**: Socket.io (WebSockets)
-- **Backend API/Socket URL**: [https://whiteboard-real-time.onrender.com](https://whiteboard-real-time.onrender.com)
 
-## Architecture & Features
-- **Frontend**: React (Vite), vanilla CSS, HTML5 Canvas, Socket.io-client.
-- **Backend**: Node.js, Express, Socket.io.
-- **Features**: Real-time multi-user drawing with low latency, Room-based sessions, Pen/Eraser/Color Picker/Brush Size, minimal glassmorphism UI.
+This is a [Next.js](https://nextjs.org/) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
 
-## Project Structure
-```text
-whiteboard/
-├── backend/
-│   ├── package.json
-│   └── server.js         # Socket.io connection logic
-├── frontend/
-│   ├── index.html
-│   ├── package.json
-│   └── src/
-│       ├── App.jsx       # Main App and Socket Context
-│       ├── index.css     # Vanilla CSS styles glassmorphism
-│       └── components/
-│           ├── Whiteboard.jsx # Canvas Logic
-│           ├── Toolbar.jsx    # Drawing Tools UI
-│           ├── UserList.jsx   # Active User bubbles
-│           └── Login.jsx      # Join Room UI
-└── README.md
-```
+## Installation
 
-## Setup Instructions
+1. Clone the repository to your local machine.
+    ```sh
+    git clone https://github.com/himanshu8443/RealTimeBoard.git
+    ```
+    
+2. Install the required packages.
+    ```sh
+    cd RealTimeBoard
+    npm install
+    
+    cd server
+    npm install
+    ```
+    
+3. Set up the environment variables:
+   Create a .env file in the root directory
+   ```sh
+   NEXT_PUBLIC_SERVER_URL= # URL of the server (e.g. http://localhost:3000 in development mode)
+   ```
+   Create a .env file in the server directory
+   ```sh
+   PORT = "5000"
+   ```
+   
 
-### 1. Start the Backend
-```bash
-cd backend
-npm install
-node server.js
-```
-The Socket.io server runs on port `3001`.
+5. Start the development server.
+    ```sh
+    npm run dev
+    ```
 
-### 2. Start the Frontend
-In a new terminal:
-```bash
-cd frontend
-npm install
-npm run dev
-```
-The React development server runs on `http://localhost:5173`.
 
+Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+
+You can start editing the page by modifying `app/page.js`. The page auto-updates as you edit the file.
+
+This project uses [`next/font`](https://nextjs.org/docs/basic-features/font-optimization) to automatically optimize and load Inter, a custom Google Font.
+
+## Learn More
+
+To learn more about Next.js, take a look at the following resources:
+
+- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
+- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+
+You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js/) - your feedback and contributions are welcome!
+
+## Deploy on Vercel
+
+The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+
+Check out our [Next.js deployment documentation](https://nextjs.org/docs/deployment) for more details.

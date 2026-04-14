@@ -1,0 +1,16 @@
+{
+  "name": "RealTimeBoard",
+  "short_name": "RealTimeBoard",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#131313",
+  "theme_color": "#CCFF00",
+  "description": "Real-time collaborative whiteboard",
+  "icons": [
+    {
+      "src": "icon.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    }
+  ]
+}
