@@ -403,6 +403,70 @@ function initCanvas() {
         ctx.scale(2, 2);
         redrawCanvas();
     });
+
+    // Paste event for images
+    canvas.addEventListener('paste', async (e) => {
+        if (e.clipboardData) {
+            for (const item of e.clipboardData.items) {
+                if (item.type.indexOf('image') !== -1) {
+                    const file = item.getAsFile();
+                    const reader = new FileReader();
+                    reader.onload = function(evt) {
+                        addImageToCanvas(evt.target.result, canvas.width / 4, canvas.height / 4);
+                    };
+                    reader.readAsDataURL(file);
+                }
+            }
+        }
+    });
+
+    // Drag-and-drop event for images
+    canvas.addEventListener('dragover', (e) => {
+        e.preventDefault();
+    });
+    canvas.addEventListener('drop', (e) => {
+        e.preventDefault();
+        if (e.dataTransfer && e.dataTransfer.files.length > 0) {
+            const file = e.dataTransfer.files[0];
+            if (file.type.startsWith('image/')) {
+                const reader = new FileReader();
+                reader.onload = function(evt) {
+                    addImageToCanvas(evt.target.result, e.offsetX * 2, e.offsetY * 2);
+                };
+                reader.readAsDataURL(file);
+            }
+        }
+    });
+}
+
+// Helper to add image to canvas and elements
+function addImageToCanvas(dataUrl, x, y) {
+    const img = new window.Image();
+    img.onload = function() {
+        const width = img.width;
+        const height = img.height;
+        elements.push({
+            element: 'image',
+            src: dataUrl,
+            offsetX: x,
+            offsetY: y,
+            width,
+            height
+        });
+        updateCanvas();
+        if (isLive && socket) {
+            socket.emit('updateCanvas', {
+                roomId: roomId,
+                userName: userName,
+                updatedElements: elements,
+                canvasColor: canvasColor
+            });
+        }
+        if (window.saveCanvasToFirestore && roomId && roomId.trim() !== '') {
+            window.saveCanvasToFirestore(roomId, elements, canvasColor);
+        }
+    };
+    img.src = dataUrl;
 }
 
 function getOffset(e, canvas) {
@@ -564,6 +628,16 @@ function updateCanvas() {
                 roughness: 0,
                 strokeWidth: ele.strokeWidth
             });
+        } else if (ele.element === 'image') {
+            const img = new window.Image();
+            img.onload = function() {
+                ctx.drawImage(img, ele.offsetX, ele.offsetY, ele.width, ele.height);
+            };
+            img.src = ele.src;
+            // For immediate draw if cached
+            if (img.complete) {
+                ctx.drawImage(img, ele.offsetX, ele.offsetY, ele.width, ele.height);
+            }
         }
     });
 }
@@ -1101,9 +1175,7 @@ function renderHistory(rooms) {
         const deleteBtn = item.querySelector('.delete');
         deleteBtn.addEventListener('click', (e) => {
             e.stopPropagation();
-            if (confirm('Are you sure you want to delete this drawing?')) {
-                deleteDrawing(room.id);
-            }
+            deleteDrawing(room.id);
         });
         
         historyList.appendChild(item);
