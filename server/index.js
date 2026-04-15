@@ -24,34 +24,73 @@ app.get("/room/:roomId", (req, res) => {
 let rooms = [];
 const Port = process.env.PORT || 5001;
 
+function getRoom(roomId) {
+  return rooms.find((room) => room.roomId === roomId);
+}
+
+function emitParticipants(roomId) {
+  const room = getRoom(roomId);
+  if (!room) return;
+
+  io.in(roomId).emit(
+    "roomParticipants",
+    room.participants.map((participant) => ({
+      socketId: participant.socketId,
+      userName: participant.userName,
+    }))
+  );
+}
+
+function emitSystemMessage(roomId, message) {
+  io.in(roomId).emit("getMessage", {
+    type: "system",
+    roomId,
+    message,
+  });
+}
+
 io.on("connection", (socket) => {
   console.log("a user connected");
   // Join Room
   socket.on("joinRoom", (data) => {
     console.log("joined room", data.roomId);
     socket.join(data.roomId);
-    const elements = rooms.find((element) => element.roomId === data.roomId);
-    if (elements) {
+    socket.data.roomId = data.roomId;
+    socket.data.userName = data.userName || "Guest";
+
+    let room = getRoom(data.roomId);
+    if (room) {
       // uppdate the new user with the current canvas
-      io.to(socket.id).emit("updateCanvas", elements);
-      elements.user = [...elements.user, socket.id];
+      io.to(socket.id).emit("updateCanvas", room);
     } else {
-      rooms.push({
+      room = {
         roomId: data.roomId,
         updatedElements: [],
-        user: [socket.id],
+        participants: [],
         canvasColor: "#121212",
-      });
+      };
+      rooms.push(room);
     }
+
+    room.participants = room.participants.filter(
+      (participant) => participant.socketId !== socket.id
+    );
+    room.participants.push({
+      socketId: socket.id,
+      userName: socket.data.userName,
+    });
+
+    emitParticipants(data.roomId);
+    emitSystemMessage(data.roomId, `${socket.data.userName} joined the live room`);
   });
   // update the canvas
   socket.on("updateCanvas", (data) => {
     // Broadcast the updated elements to all connected clients
     socket.to(data.roomId).emit("updateCanvas", data);
-    const elements = rooms.find((element) => element.roomId === data.roomId);
-    if (elements) {
-      elements.updatedElements = data.updatedElements;
-      elements.canvasColor = data.canvasColor;
+    const room = getRoom(data.roomId);
+    if (room) {
+      room.updatedElements = data.updatedElements;
+      room.canvasColor = data.canvasColor;
     }
   });
 
@@ -70,13 +109,24 @@ io.on("connection", (socket) => {
 
   //clear elements when no one is in the room
   socket.on("disconnect", () => {
-    rooms.forEach((element) => {
-      element.user = element.user.filter((user) => user !== socket.id);
-      if (element.user.length === 0) {
-        rooms = rooms.filter((room) => room.roomId !== element.roomId);
+    rooms = rooms.filter((room) => {
+      const participant = room.participants.find(
+        (entry) => entry.socketId === socket.id
+      );
+
+      if (participant) {
+        room.participants = room.participants.filter(
+          (entry) => entry.socketId !== socket.id
+        );
+        emitParticipants(room.roomId);
+        emitSystemMessage(
+          room.roomId,
+          `${participant.userName} left the live room`
+        );
       }
+
+      return room.participants.length > 0;
     });
-    // console.log(rooms);
   });
 });
 

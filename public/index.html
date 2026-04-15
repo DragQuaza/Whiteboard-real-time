@@ -5,6 +5,9 @@
 <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
 <!-- Build Trigger: 2026-04-15 v2 -->
 <title>RealTimeBoard | Kinetic Creativity</title>
+<script>
+    document.documentElement.dataset.appRoute = window.location.pathname.startsWith('/room/') ? 'room' : 'landing';
+</script>
 <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700;800&amp;family=Manrope:wght@200;300;400;500;600&amp;display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
@@ -100,6 +103,7 @@
     <link rel="manifest" href="/manifest.json">
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <script src="https://unpkg.com/roughjs@4.5.2/bundled/rough.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body>
@@ -110,7 +114,7 @@
 <div class="text-3xl font-bold tracking-tighter text-[#E5E2E1] font-headline uppercase">RealTimeBoard</div>
 <div class="hidden md:flex items-center space-x-12">
 <a class="font-headline uppercase tracking-tighter text-[#E5E2E1] hover:text-[#CCFF00] transition-colors duration-300" href="#">Features</a>
-<a class="font-headline uppercase tracking-tighter text-[#CCFF00] border-b-2 border-[#CCFF00] pb-1" href="#">Live Sessions</a>
+<a class="font-headline uppercase tracking-tighter text-[#CCFF00] border-b-2 border-[#CCFF00] pb-1" href="#">Share board/a>
 <a class="font-headline uppercase tracking-tighter text-[#E5E2E1] hover:text-[#CCFF00] transition-colors duration-300" href="#">Cloud Sync</a>
 </div>
 <button id="top-signin-btn" class="font-headline uppercase tracking-tighter text-[#E5E2E1] hover:text-[#CCFF00] transition-colors duration-300 active:scale-95">Sign In</button>
@@ -177,7 +181,7 @@
 <div class="w-full max-w-7xl grid grid-cols-1 md:grid-cols-12 gap-12 items-center">
 <div class="md:col-span-5 relative">
 <div class="absolute -top-12 -left-12 w-full h-full border-2 border-primary/20 -z-10"></div>
-<img class="w-full shadow-2xl" data-alt="minimalist studio photography of a high-end metal computer tower on a black platform with subtle neon green lighting" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBb4KGlE-_VqETBYiD9msZ-zggR5dAUnr2OnJQ7LsKTIYASjMWeessx-VrVUUUzgz30WkJFD767O-BmeaLUyQ6SF0lXVQU1_VkwE0oO3elcU0u95h89A5drMxxnmRlqILf134MLhDHzpB2FebkQDh9K5jUxv0ugq2h7Z4jomkNBxmOi0qy7fgDqVYicuWVUY3ZywKYFF0hqFPLP85g3Z13SPvsbJVb1srkOSwyomXT3DzIk3xgiXPsUjnYUp_paw0yCKuWT5VMKTZGJ"/>
+<img class="w-full shadow-2xl" data-alt="ChatGPT Image" src="/ChatGPT%20Image%20Apr%2015,%202026,%2005_22_01%20PM.png"/>
 <div class="absolute -bottom-8 -right-8 glass-card p-8 w-48 h-48 flex items-center justify-center">
 <span class="font-headline font-black text-6xl text-primary">Real-Time</span>
 </div>
@@ -246,12 +250,13 @@
         <!-- Sidebar & Toggle Container -->
         <aside id="sidebar" class="w-[280px] h-full bg-[#1c1b1b] border-r border-primary/10 flex flex-col transition-all duration-300 z-[1100] relative shrink-0">
             <div class="p-6 flex flex-col h-full relative w-[280px]">
-                <!-- Close Button -->
-                <button id="close-sidebar-btn" class="absolute right-4 top-4 text-on-surface/40 hover:text-primary transition-colors items-center justify-center" title="Close Sidebar">
-                    <span class="material-symbols-outlined text-[20px]">first_page</span>
-                </button>
+                <div class="sidebar-header">
+                    <button id="close-sidebar-btn" class="text-on-surface/40 hover:text-primary transition-colors items-center justify-center" title="Close Sidebar">
+                        <span class="material-symbols-outlined text-[20px]">first_page</span>
+                    </button>
+                </div>
 
-                <button id="new-drawing-btn" class="w-full bg-primary text-on-primary py-3 px-4 font-headline font-bold uppercase tracking-tight text-sm flex items-center justify-center gap-2 hover:brightness-110 active:scale-[0.98] transition-all mb-8 mt-4 lg:mt-0">
+                <button id="new-drawing-btn" class="w-full bg-primary text-on-primary py-3 px-4 font-headline font-bold uppercase tracking-tight text-sm flex items-center justify-center gap-2 hover:brightness-110 active:scale-[0.98] transition-all mb-8 mt-0">
                     <span class="material-symbols-outlined text-[18px]">add</span> New Drawing
                 </button>
 
@@ -290,9 +295,18 @@
         <div class="flex-1 relative flex flex-col overflow-hidden">
         <div class="toolbar">
             <div class="toolbar-left">
-                <div class="font-headline font-black text-xs tracking-widest uppercase text-primary">RealTimeBoard</div>
-                <div id="sync-status" class="sync-status text-[10px] font-headline uppercase tracking-tighter text-on-surface/40 ml-4 flex items-center gap-1">
-                    <span class="material-symbols-outlined text-[12px] text-green-500">cloud_done</span> Cloud Synced
+                <div class="toolbar-brand-slot">
+                    <div class="toolbar-brand">
+                        <div class="font-headline font-black text-xs tracking-widest uppercase text-primary">RealTimeBoard</div>
+                        <div id="sync-status-toolbar" data-sync-status class="sync-status text-[10px] font-headline uppercase tracking-tighter text-on-surface/40 flex items-center gap-1">
+                            <span class="material-symbols-outlined text-[12px] text-green-500">cloud_done</span> Cloud Synced
+                        </div>
+                    </div>
+                </div>
+                <div id="presence-pill" class="presence-pill hidden">
+                    <span class="material-symbols-outlined text-[14px]">group</span>
+                    <span id="presence-count">0</span>
+                    <span>Live</span>
                 </div>
             </div>
             <div class="tool-group">
@@ -337,7 +351,8 @@
             </div>
             <div class="toolbar-right">
                 <div class="session-actions">
-                    <button id="live-session-btn" class="btn-secondary">Live Session</button>
+                    <button id="live-session-btn" class="btn-secondary">Share board</button>
+                    <button id="participants-btn" class="btn-secondary hidden">People <span id="participants-count-pill">0</span></button>
                     <button id="chat-btn" class="btn-secondary hidden"><i class="fas fa-comment"></i><span id="chat-badge" class="chat-badge hidden">0</span></button>
                 </div>
                 <button id="menu-btn" class="menu-btn"><i class="fas fa-bars"></i></button>
@@ -347,9 +362,7 @@
         <div id="menu-dropdown" class="menu-dropdown hidden">
             <button id="clear-canvas-btn" class="menu-item"><i class="fas fa-trash"></i> Clear Canvas</button>
             <div class="menu-divider"></div>
-            <button id="save-file-btn" class="menu-item"><i class="fas fa-save"></i> Save File</button>
-            <button id="load-file-btn" class="menu-item"><i class="fas fa-folder-open"></i> Open File</button>
-            <input type="file" id="file-input" accept=".rtb,.json" class="hidden">
+            <button id="export-board-btn" class="menu-item"><i class="fas fa-file-export"></i> Export Image / PDF</button>
             <div class="menu-divider"></div>
             <label class="menu-label">Stroke Width: <span id="stroke-value">5</span></label>
             <input type="range" id="stroke-width-slider" min="1" max="100" value="5" class="stroke-slider">
@@ -376,13 +389,13 @@
                         </svg>
                     </div>
                     <div class="form-group">
-                        <label>Your Name</label>
-                        <input type="text" id="username-input" placeholder="Your Name" value="Anonymous">
+                        <label>Google Account</label>
+                        <input type="text" id="username-input" placeholder="Sign in with Google to continue" value="Sign in with Google to use live sessions" readonly>
                     </div>
                     <div id="share-link-container" class="hidden">
                         <div class="link-info">
                             <label>Share Join Link</label>
-                            <p>Anyone with this link can join the session</p>
+                            <p>Anyone with this link must sign in with Google before joining the live session</p>
                         </div>
                         <div class="link-row">
                             <input type="text" id="share-link-input" readonly>
@@ -391,6 +404,28 @@
                     </div>
                     <div class="modal-actions">
                         <button id="start-session-modal" class="btn-primary">Start</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="live-auth-modal" class="modal hidden">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Google Sign-In Required</h2>
+                    <button id="close-live-auth-modal" class="close-btn"><i class="fas fa-times"></i></button>
+                </div>
+                <div class="modal-body">
+                    <div class="modal-image">
+                        <svg class="live-icon" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                        </svg>
+                    </div>
+                    <p id="live-auth-message" class="text-sm text-on-surface/70 leading-relaxed">
+                        Sign in with Google to join this live session.
+                    </p>
+                    <div class="modal-actions">
+                        <button id="live-auth-signin-btn" class="btn-primary">Continue with Google</button>
                     </div>
                 </div>
             </div>
@@ -409,6 +444,43 @@
                 </form>
             </div>
         </div>
+
+        <div id="participants-modal" class="modal hidden">
+            <div class="chat-modal-content participants-modal-content">
+                <div class="chat-header">
+                    <h2>Participants</h2>
+                    <button id="close-participants-modal" class="close-btn"><i class="fas fa-times"></i></button>
+                </div>
+                <div class="participants-summary">
+                    <div class="participants-kicker">Live Room</div>
+                    <div id="participants-summary-count" class="participants-summary-count">0 people connected</div>
+                </div>
+                <div id="participants-list" class="participants-list"></div>
+            </div>
+        </div>
+
+        <div id="export-modal" class="modal hidden">
+            <div class="modal-content export-modal-content">
+                <div class="modal-header">
+                    <h2>Export Board</h2>
+                    <button id="close-export-modal" class="close-btn"><i class="fas fa-times"></i></button>
+                </div>
+                <div class="modal-body">
+                    <p class="export-copy">Download the current board as a crisp image or a presentation-ready PDF.</p>
+                    <div class="export-actions">
+                        <button id="export-image-btn" class="btn-primary">Export Image</button>
+                        <button id="export-pdf-btn" class="btn-secondary">Export PDF</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+            <div id="room-transition" class="room-transition hidden">
+                <div class="room-transition-card">
+                    <div class="room-transition-kicker">Switching Boards</div>
+                    <div id="room-transition-message" class="room-transition-message">Loading drawing...</div>
+                </div>
+            </div>
 
             <canvas id="board"></canvas>
             <div id="eraser-cursor" class="eraser-cursor hidden"></div>
@@ -508,18 +580,21 @@
         }
 
         let _saveTimer = null;
+        function updateSyncStatusUI(markup, isSyncing = false) {
+            document.querySelectorAll('[data-sync-status]').forEach((syncStatus) => {
+                syncStatus.innerHTML = markup;
+                syncStatus.classList.toggle('text-primary', isSyncing);
+                syncStatus.classList.toggle('text-on-surface/40', !isSyncing);
+            });
+        }
+
         window.saveCanvasToFirestore = async (roomId, elements, canvasColor) => {
             if (!roomId || typeof roomId !== 'string' || roomId.trim() === '') return;
 
             // Debounce: wait 1000ms after last call before actually saving to avoid hitting quotas
             if (_saveTimer) clearTimeout(_saveTimer);
             _saveTimer = setTimeout(async () => {
-                const syncStatus = document.getElementById('sync-status');
-                if (syncStatus) {
-                    syncStatus.innerHTML = '<span class="material-symbols-outlined text-[12px] animate-spin">sync</span> Syncing...';
-                    syncStatus.classList.remove('text-on-surface/40');
-                    syncStatus.classList.add('text-primary');
-                }
+                updateSyncStatusUI('<span class="material-symbols-outlined text-[12px] animate-spin">sync</span> Syncing...', true);
                 try {
                     const firestoreElements = flattenElementsForFirestore(elements);
                     const roomPayload = {
@@ -536,21 +611,15 @@
 
                     await setDoc(doc(db, "rooms", roomId), roomPayload, { merge: true });
                     
-                    if (syncStatus) {
-                        setTimeout(() => {
-                            syncStatus.innerHTML = '<span class="material-symbols-outlined text-[12px] text-green-500">cloud_done</span> Cloud Synced';
-                            syncStatus.classList.remove('text-primary');
-                            syncStatus.classList.add('text-on-surface/40');
-                        }, 500);
-                    }
+                    setTimeout(() => {
+                        updateSyncStatusUI('<span class="material-symbols-outlined text-[12px] text-green-500">cloud_done</span> Cloud Synced');
+                    }, 500);
                     
                     // Refresh history if sidebar is visible
                     if (window.loadUserHistory) window.loadUserHistory();
                 } catch (e) {
                     console.error("Error saving canvas:", e);
-                    if (syncStatus) {
-                        syncStatus.innerHTML = `<span class="material-symbols-outlined text-[12px] text-red-500">cloud_off</span> Sync Failed`;
-                    }
+                    updateSyncStatusUI('<span class="material-symbols-outlined text-[12px] text-red-500">cloud_off</span> Sync Failed');
                 }
             }, 1000);
         };
@@ -597,7 +666,13 @@
         async function handleSignIn() {
             try {
                 const result = await signInWithPopup(auth, provider);
-                if (window.showToast) window.showToast(`Welcome, ${result.user.displayName}!`);
+                const identityName = result.user.displayName || result.user.email || 'Authenticated User';
+                const isLandingPage = !window.location.pathname.startsWith('/room/');
+                if (isLandingPage && window.startNewSession) {
+                    window.startNewSession();
+                    return;
+                }
+                if (window.showToast) window.showToast(`Welcome, ${identityName}!`);
             } catch (error) {
                 console.error("Auth Error", error);
                 if (window.showToast) window.showToast('Sign in failed!');
@@ -616,8 +691,9 @@
         onAuthStateChanged(auth, (user) => {
             const sidebarUserName = document.getElementById('sidebar-user-name');
             if (user) {
-                if (window.setAppUserName) window.setAppUserName(user.displayName);
-                if (sidebarUserName) sidebarUserName.textContent = user.displayName || user.email;
+                const identityName = user.displayName || user.email || 'Authenticated User';
+                if (window.setAppUserName) window.setAppUserName(identityName);
+                if (sidebarUserName) sidebarUserName.textContent = identityName;
                 if (window.loadUserHistory) window.loadUserHistory();
                 
                 if (heroSignInBtn) {
@@ -642,8 +718,15 @@
                     topSignInBtn.onclick = handleSignIn;
                 }
             }
+            
+            if (window.handleLiveAuthStateChange) {
+                window.handleLiveAuthStateChange(user);
+            }
         });
 
+        window.handleGoogleSignIn = handleSignIn;
+        window.isAuthenticatedUser = () => Boolean(auth.currentUser);
+        window.getAuthenticatedUserName = () => auth.currentUser?.displayName || auth.currentUser?.email || null;
         window.handleSignOut = handleSignOut;
     </script>
 </body>

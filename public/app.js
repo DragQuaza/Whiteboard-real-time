@@ -1,6 +1,6 @@
-const SERVER_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
+const SERVER_URL = window.BACKEND_URL || (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
     ? 'http://localhost:5001' 
-    : 'https://whiteboard-real-time-one.onrender.com'; // Fallback to Render URL
+    : 'https://whiteboard-real-time-one.onrender.com'); // Default Render URL
 
 let socket = null;
 let roomId = null;
@@ -15,69 +15,353 @@ let isDrawing = false;
 let currentElement = null;
 let isLive = false;
 let messages = [];
+let pendingLiveAction = null;
+let participants = [];
+let landingInitialized = false;
+let roomInitialized = false;
+let activeRoomLoadRequest = 0;
+
+const DEFAULT_CANVAS_COLOR = '#131313';
 
 const generator = rough.generator();
 
-function init() {
-    const path = window.location.pathname;
-    if (path.startsWith('/room/')) {
-        roomId = path.split('/room/')[1];
-        initRoom();
-    } else {
-        initLanding();
+function getAuthenticatedUserName() {
+    if (window.getAuthenticatedUserName) {
+        return window.getAuthenticatedUserName();
     }
+    return null;
+}
+
+function isAuthenticatedForLiveSession() {
+    return Boolean(window.isAuthenticatedUser && window.isAuthenticatedUser());
+}
+
+function syncLiveSessionIdentity() {
+    const usernameInput = document.getElementById('username-input');
+    const authenticatedName = getAuthenticatedUserName();
+    
+    if (authenticatedName) {
+        userName = authenticatedName;
+    }
+    
+    if (!usernameInput) return;
+    
+    usernameInput.readOnly = true;
+    usernameInput.value = authenticatedName || 'Sign in with Google to use live sessions';
+}
+
+function openLiveAuthModal(message, action = 'join') {
+    const modal = document.getElementById('live-auth-modal');
+    const messageNode = document.getElementById('live-auth-message');
+    if (!modal || !messageNode) return;
+    
+    pendingLiveAction = action;
+    messageNode.textContent = message;
+    modal.classList.remove('hidden');
+}
+
+function closeLiveAuthModal() {
+    const modal = document.getElementById('live-auth-modal');
+    if (modal) {
+        modal.classList.add('hidden');
+    }
+}
+
+function getParticipantInitials(name) {
+    return (name || 'User')
+        .split(/\s+/)
+        .filter(Boolean)
+        .slice(0, 2)
+        .map((part) => part[0].toUpperCase())
+        .join('');
+}
+
+function updatePresenceUI() {
+    const participantsBtn = document.getElementById('participants-btn');
+    const presencePill = document.getElementById('presence-pill');
+    const countNode = document.getElementById('presence-count');
+    const pillCountNode = document.getElementById('participants-count-pill');
+    const summaryCountNode = document.getElementById('participants-summary-count');
+    const participantsList = document.getElementById('participants-list');
+    const total = participants.length;
+
+    if (countNode) countNode.textContent = total;
+    if (pillCountNode) pillCountNode.textContent = total;
+    if (summaryCountNode) {
+        summaryCountNode.textContent = `${total} ${total === 1 ? 'person' : 'people'} connected`;
+    }
+
+    const isVisible = isLive && total > 0;
+    if (participantsBtn) participantsBtn.classList.toggle('hidden', !isVisible);
+    if (presencePill) presencePill.classList.toggle('hidden', !isVisible);
+
+    if (!participantsList) return;
+
+    if (!total) {
+        participantsList.innerHTML = '<div class="participants-empty">No one is in the room yet</div>';
+        return;
+    }
+
+    participantsList.innerHTML = participants.map((participant) => {
+        const isOwn = participant.socketId === socket?.id;
+        const roleLabel = isOwn ? 'You' : 'Participant';
+        return `
+            <div class="participant-row">
+                <div class="participant-avatar">${getParticipantInitials(participant.userName)}</div>
+                <div class="participant-meta">
+                    <div class="participant-name">${participant.userName}</div>
+                    <div class="participant-role">${roleLabel}</div>
+                </div>
+                <div class="participant-status">Connected</div>
+            </div>
+        `;
+    }).join('');
+}
+
+function requireGoogleSignInForLiveSession(action) {
+    syncLiveSessionIdentity();
+    if (isAuthenticatedForLiveSession()) {
+        return true;
+    }
+    
+    const message = action === 'host'
+        ? 'Sign in with Google to start a live session. Everyone in chat will appear by their Google identity.'
+        : 'Sign in with Google to join this live session. Chat and collaboration use Google identities so everyone knows who is here.';
+    
+    openLiveAuthModal(message, action);
+    return false;
+}
+
+function isRoomRoute(path = window.location.pathname) {
+    return path.startsWith('/room/');
+}
+
+function getRoomIdFromPath(path = window.location.pathname) {
+    if (!isRoomRoute(path)) return null;
+    const [, routeRoomId] = path.split('/room/');
+    return routeRoomId ? decodeURIComponent(routeRoomId.split('?')[0]) : null;
+}
+
+function setRouteMode() {
+    document.documentElement.dataset.appRoute = isRoomRoute() ? 'room' : 'landing';
+}
+
+function updateHistorySelection() {
+    document.querySelectorAll('.history-item').forEach((item) => {
+        const isActive = item.dataset.roomId === roomId;
+        item.classList.toggle('active', isActive);
+
+        const icon = item.querySelector('.history-icon');
+        if (icon) {
+            icon.textContent = isActive ? 'edit_square' : 'draw';
+        }
+    });
+}
+
+function resetChatUI() {
+    messages = [];
+
+    const chatMessages = document.getElementById('chat-messages');
+    if (chatMessages) {
+        chatMessages.innerHTML = '';
+    }
+
+    const chatBadge = document.getElementById('chat-badge');
+    if (chatBadge) {
+        chatBadge.textContent = '0';
+        chatBadge.classList.add('hidden');
+    }
+
+    const chatBtn = document.getElementById('chat-btn');
+    if (chatBtn) {
+        chatBtn.classList.add('hidden');
+    }
+}
+
+function disconnectLiveSession() {
+    if (socket) {
+        socket.disconnect();
+        socket = null;
+    }
+
+    participants = [];
+    updatePresenceUI();
+    resetChatUI();
+}
+
+function resetSessionModalState() {
+    const sessionModal = document.getElementById('session-modal');
+    const authModal = document.getElementById('live-auth-modal');
+    const participantsModal = document.getElementById('participants-modal');
+    const chatModal = document.getElementById('chat-modal');
+    const exportModal = document.getElementById('export-modal');
+    const menuDropdown = document.getElementById('menu-dropdown');
+    const shareLinkContainer = document.getElementById('share-link-container');
+    const shareLinkInput = document.getElementById('share-link-input');
+    const startBtn = document.getElementById('start-session-modal');
+
+    [sessionModal, authModal, participantsModal, chatModal, exportModal, menuDropdown].forEach((node) => {
+        if (node) node.classList.add('hidden');
+    });
+
+    if (shareLinkContainer) shareLinkContainer.classList.add('hidden');
+    if (shareLinkInput) shareLinkInput.value = '';
+    if (startBtn) {
+        startBtn.textContent = 'Start';
+        startBtn.classList.remove('btn-danger');
+        startBtn.onclick = null;
+    }
+
+    pendingLiveAction = null;
+}
+
+function setRoomTransitionState(isLoading, message = 'Loading drawing...') {
+    const transition = document.getElementById('room-transition');
+    const messageNode = document.getElementById('room-transition-message');
+    if (!transition) return;
+
+    if (messageNode) {
+        messageNode.textContent = message;
+    }
+
+    transition.classList.toggle('hidden', !isLoading);
+}
+
+function clearRoomState() {
+    elements = [];
+    history = [];
+    currentElement = null;
+    isDrawing = false;
+    canvasColor = DEFAULT_CANVAS_COLOR;
+}
+
+function navigateTo(path, { replace = false, skipTransition = false } = {}) {
+    const currentUrl = `${window.location.pathname}${window.location.search}`;
+    if (currentUrl === path) return;
+
+    const updateHistory = replace ? window.history.replaceState : window.history.pushState;
+    updateHistory.call(window.history, {}, '', path);
+    handleRouteChange({ skipTransition });
+}
+
+function navigateToRoom(nextRoomId, options = {}) {
+    const search = options.live ? '?live=true' : '';
+    navigateTo(`/room/${nextRoomId}${search}`, options);
+}
+
+function handleRouteChange({ skipTransition = false } = {}) {
+    setRouteMode();
+
+    if (isRoomRoute()) {
+        roomId = getRoomIdFromPath();
+        initRoom({ skipTransition });
+        return;
+    }
+
+    initLanding();
+}
+
+function init() {
+    window.addEventListener('popstate', () => {
+        handleRouteChange();
+    });
+
+    handleRouteChange({ skipTransition: true });
 }
 
 function initLanding() {
+    if (!landingInitialized) {
+        document.getElementById('start-session-btn').addEventListener('click', startNewSession);
+        
+        const createBtn = document.getElementById('create-session-btn');
+        if (createBtn) {
+            createBtn.addEventListener('click', startNewSession);
+        }
+
+        landingInitialized = true;
+    }
+
     document.getElementById('landing-page').classList.remove('hidden');
     document.getElementById('room-page').classList.add('hidden');
-    
-    document.getElementById('start-session-btn').addEventListener('click', startNewSession);
-    
-    const createBtn = document.getElementById('create-session-btn');
-    if (createBtn) {
-        createBtn.addEventListener('click', startNewSession);
-    }
+
+    activeRoomLoadRequest++;
+    roomId = null;
+    isLive = false;
+    setRoomTransitionState(false);
+    disconnectLiveSession();
+    resetSessionModalState();
 }
 
 function startNewSession() {
-    roomId = generateRoomId();
-    window.location.href = `/room/${roomId}`;
+    navigateToRoom(generateRoomId());
 }
 
-function initRoom() {
-    document.getElementById('landing-page').classList.add('hidden');
-    document.getElementById('room-page').classList.remove('hidden');
-    
-    initCanvas();
-    initTools();
-    initColorPicker();
-    initUndoRedo();
-    initMenu();
-    initSessionModal();
-    initChat();
-    initSidebar();
-    
-    userName = localStorage.getItem('userName') || 'Anonymous';
-    document.getElementById('username-input').value = userName;
-    
-    const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.get('live') === 'true') {
-        isLive = true;
+window.startNewSession = startNewSession;
+
+async function loadRoom() {
+    const requestId = ++activeRoomLoadRequest;
+    const nextIsLive = new URLSearchParams(window.location.search).get('live') === 'true';
+
+    disconnectLiveSession();
+    resetSessionModalState();
+    isLive = nextIsLive;
+    updatePresenceUI();
+    updateHistorySelection();
+
+    let nextElements = [];
+    let nextCanvasColor = DEFAULT_CANVAS_COLOR;
+
+    if (window.getCanvasFromFirestore && roomId) {
+        const data = await window.getCanvasFromFirestore(roomId);
+        if (requestId !== activeRoomLoadRequest) return;
+
+        if (data) {
+            nextElements = data.elements || [];
+            nextCanvasColor = data.canvasColor || DEFAULT_CANVAS_COLOR;
+        }
+    }
+
+    if (requestId !== activeRoomLoadRequest) return;
+
+    elements = nextElements;
+    history = [];
+    currentElement = null;
+    isDrawing = false;
+    canvasColor = nextCanvasColor;
+    updateCanvas();
+
+    if (isLive && requireGoogleSignInForLiveSession('join')) {
         connectSocket();
     }
 
-    // Load from Firestore
-    if (window.getCanvasFromFirestore) {
-        window.getCanvasFromFirestore(roomId).then(data => {
-            if (data) {
-                elements = data.elements || [];
-                canvasColor = data.canvasColor || '#131313';
-                updateCanvas();
-                showToast('Canvas restored from Cloud');
-            }
-        });
+    setRoomTransitionState(false);
+}
+
+function initRoom({ skipTransition = false } = {}) {
+    document.getElementById('landing-page').classList.add('hidden');
+    document.getElementById('room-page').classList.remove('hidden');
+    const wasRoomInitialized = roomInitialized;
+    
+    if (!roomInitialized) {
+        initCanvas();
+        initTools();
+        initColorPicker();
+        initUndoRedo();
+        initMenu();
+        initSessionModal();
+        initChat();
+        initSidebar();
+        roomInitialized = true;
     }
+    
+    userName = localStorage.getItem('userName') || 'Anonymous';
+    syncLiveSessionIdentity();
+
+    if (!skipTransition && wasRoomInitialized) {
+        setRoomTransitionState(true);
+    }
+
+    loadRoom();
 }
 
 function generateRoomId() {
@@ -379,6 +663,8 @@ function initUndoRedo() {
 function initMenu() {
     const menuBtn = document.getElementById('menu-btn');
     const menuDropdown = document.getElementById('menu-dropdown');
+    const exportModal = document.getElementById('export-modal');
+    const closeExportModalBtn = document.getElementById('close-export-modal');
     
     menuBtn.addEventListener('click', () => {
         menuDropdown.classList.toggle('hidden');
@@ -408,37 +694,49 @@ function initMenu() {
         }
     });
     
-    document.getElementById('save-file-btn').addEventListener('click', () => {
-        const data = JSON.stringify(elements);
-        const blob = new Blob([data], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
+    document.getElementById('export-board-btn').addEventListener('click', () => {
+        menuDropdown.classList.add('hidden');
+        if (exportModal) {
+            exportModal.classList.remove('hidden');
+        }
+    });
+
+    if (closeExportModalBtn) {
+        closeExportModalBtn.addEventListener('click', () => {
+            exportModal.classList.add('hidden');
+        });
+    }
+
+    document.getElementById('export-image-btn').addEventListener('click', () => {
+        const canvas = document.getElementById('board');
+        const url = canvas.toDataURL('image/png');
         const link = document.createElement('a');
-        link.download = 'drawing.rtb';
+        link.download = `${roomId || 'whiteboard'}.png`;
         link.href = url;
         link.click();
-        URL.revokeObjectURL(url);
-        menuDropdown.classList.add('hidden');
-        showToast('File Saved Successfully');
+        exportModal.classList.add('hidden');
+        showToast('Board exported as image');
     });
-    
-    document.getElementById('load-file-btn').addEventListener('click', () => {
-        document.getElementById('file-input').click();
-    });
-    
-    document.getElementById('file-input').addEventListener('change', (e) => {
-        const file = e.target.files[0];
-        if (file && (file.name.endsWith('.rtb') || file.name.endsWith('.json'))) {
-            const reader = new FileReader();
-            reader.onload = (event) => {
-                elements = JSON.parse(event.target.result);
-                updateCanvas();
-                showToast('File Loaded Successfully');
-            };
-            reader.readAsText(file);
-        } else {
-            alert('Please select a valid .rtb file');
+
+    document.getElementById('export-pdf-btn').addEventListener('click', () => {
+        const canvas = document.getElementById('board');
+        const pdfApi = window.jspdf?.jsPDF;
+
+        if (!pdfApi) {
+            showToast('PDF export is unavailable right now');
+            return;
         }
-        menuDropdown.classList.add('hidden');
+
+        const imageData = canvas.toDataURL('image/png');
+        const pdf = new pdfApi({
+            orientation: canvas.width >= canvas.height ? 'landscape' : 'portrait',
+            unit: 'px',
+            format: [canvas.width, canvas.height]
+        });
+        pdf.addImage(imageData, 'PNG', 0, 0, canvas.width, canvas.height);
+        pdf.save(`${roomId || 'whiteboard'}.pdf`);
+        exportModal.classList.add('hidden');
+        showToast('Board exported as PDF');
     });
     
     document.getElementById('stroke-width-slider').addEventListener('input', (e) => {
@@ -467,8 +765,11 @@ function initMenu() {
 
 function initSessionModal() {
     const modal = document.getElementById('session-modal');
+    const authModal = document.getElementById('live-auth-modal');
     const liveSessionBtn = document.getElementById('live-session-btn');
     const closeBtn = document.getElementById('close-session-modal');
+    const closeAuthBtn = document.getElementById('close-live-auth-modal');
+    const authSignInBtn = document.getElementById('live-auth-signin-btn');
     const startBtn = document.getElementById('start-session-modal');
     const usernameInput = document.getElementById('username-input');
     const shareLinkContainer = document.getElementById('share-link-container');
@@ -476,6 +777,8 @@ function initSessionModal() {
     const copyLinkBtn = document.getElementById('copy-link-btn');
     
     liveSessionBtn.addEventListener('click', () => {
+        syncLiveSessionIdentity();
+        if (!requireGoogleSignInForLiveSession('host')) return;
         modal.classList.remove('hidden');
     });
     
@@ -483,12 +786,32 @@ function initSessionModal() {
         modal.classList.add('hidden');
     });
     
-    usernameInput.addEventListener('change', (e) => {
-        userName = e.target.value;
-        localStorage.setItem('userName', userName);
-    });
+    if (closeAuthBtn) {
+        closeAuthBtn.addEventListener('click', () => {
+            closeLiveAuthModal();
+            if (pendingLiveAction === 'join') {
+                const liveUrl = new URL(window.location.href);
+                liveUrl.searchParams.delete('live');
+                navigateTo(`${liveUrl.pathname}${liveUrl.search}`, { replace: true, skipTransition: true });
+            }
+            pendingLiveAction = null;
+        });
+    }
+    
+    if (authSignInBtn) {
+        authSignInBtn.addEventListener('click', async () => {
+            if (window.handleGoogleSignIn) {
+                await window.handleGoogleSignIn();
+            }
+        });
+    }
+    
+    usernameInput.readOnly = true;
+    syncLiveSessionIdentity();
     
     startBtn.addEventListener('click', () => {
+        if (!requireGoogleSignInForLiveSession('host')) return;
+        userName = getAuthenticatedUserName() || userName;
         if (!isLive) {
             isLive = true;
             connectSocket();
@@ -499,11 +822,8 @@ function initSessionModal() {
         startBtn.classList.add('btn-danger');
         startBtn.onclick = () => {
             isLive = false;
-            if (socket) {
-                socket.disconnect();
-                socket = null;
-            }
-            window.location.href = `/room/${roomId}`;
+            disconnectLiveSession();
+            navigateToRoom(roomId, { replace: true, skipTransition: true });
         };
     });
     
@@ -517,6 +837,9 @@ function initSessionModal() {
 function initChat() {
     const chatBtn = document.getElementById('chat-btn');
     const chatModal = document.getElementById('chat-modal');
+    const participantsBtn = document.getElementById('participants-btn');
+    const participantsModal = document.getElementById('participants-modal');
+    const closeParticipantsBtn = document.getElementById('close-participants-modal');
     const closeChatBtn = document.getElementById('close-chat-modal');
     const chatForm = document.getElementById('chat-form');
     const chatInput = document.getElementById('chat-input');
@@ -530,6 +853,18 @@ function initChat() {
     closeChatBtn.addEventListener('click', () => {
         chatModal.classList.add('hidden');
     });
+
+    if (participantsBtn && participantsModal) {
+        participantsBtn.addEventListener('click', () => {
+            participantsModal.classList.remove('hidden');
+        });
+    }
+
+    if (closeParticipantsBtn && participantsModal) {
+        closeParticipantsBtn.addEventListener('click', () => {
+            participantsModal.classList.add('hidden');
+        });
+    }
     
     chatForm.addEventListener('submit', (e) => {
         e.preventDefault();
@@ -540,6 +875,13 @@ function initChat() {
 }
 
 function connectSocket() {
+    if (!isAuthenticatedForLiveSession()) {
+        requireGoogleSignInForLiveSession('join');
+        return;
+    }
+    if (socket) return;
+    
+    userName = getAuthenticatedUserName() || userName;
     socket = io(SERVER_URL, {
         forceNew: true,
         reconnectionAttempts: 'Infinity',
@@ -573,10 +915,21 @@ function connectSocket() {
             badge.classList.remove('hidden');
         }
     });
+
+    socket.on('roomParticipants', (roomParticipants) => {
+        participants = roomParticipants || [];
+        updatePresenceUI();
+    });
+
+    socket.on('disconnect', () => {
+        participants = [];
+        updatePresenceUI();
+    });
 }
 
 function sendMessage(message) {
     if (!socket) return;
+    userName = getAuthenticatedUserName() || userName;
     
     const data = {
         message: message,
@@ -590,15 +943,16 @@ function sendMessage(message) {
 
 function renderMessage(message) {
     const chatMessages = document.getElementById('chat-messages');
-    const isOwn = message.socketId === socket?.id;
+    const isSystem = message.type === 'system';
+    const isOwn = !isSystem && message.socketId === socket?.id;
     
     const messageDiv = document.createElement('div');
-    messageDiv.className = isOwn ? 'message own' : 'message other';
-    
-    if (!isOwn) {
+    messageDiv.className = isSystem ? 'message system' : (isOwn ? 'message own' : 'message other');
+
+    if (!isSystem) {
         const userNameDiv = document.createElement('p');
         userNameDiv.className = 'message-username';
-        userNameDiv.textContent = message.userName;
+        userNameDiv.textContent = isOwn ? `${message.userName} (You)` : message.userName;
         messageDiv.appendChild(userNameDiv);
     }
     
@@ -719,6 +1073,7 @@ function renderHistory(rooms) {
     rooms.forEach(room => {
         const item = document.createElement('div');
         item.className = `history-item ${room.id === roomId ? 'active' : ''}`;
+        item.dataset.roomId = room.id;
         item.innerHTML = `
             <span class="material-symbols-outlined history-icon">${room.id === roomId ? 'edit_square' : 'draw'}</span>
             <span class="history-title">${room.displayTitle}</span>
@@ -731,7 +1086,7 @@ function renderHistory(rooms) {
         item.addEventListener('click', (e) => {
             if (e.target.closest('.history-action-btn')) return;
             if (room.id !== roomId) {
-                window.location.href = `/room/${room.id}`;
+                navigateToRoom(room.id);
             }
         });
 
@@ -767,7 +1122,11 @@ async function deleteDrawing(id) {
     if (window.deleteRoomFromFirestore) {
         await window.deleteRoomFromFirestore(id);
         if (id === roomId) {
-            window.location.href = '/';
+            clearRoomState();
+            if (roomInitialized) {
+                updateCanvas();
+            }
+            navigateTo('/', { replace: true, skipTransition: true });
         } else {
             loadUserHistory();
             showToast('Drawing deleted');
@@ -781,6 +1140,46 @@ window.setAppUserName = function(name) {
     localStorage.setItem('userName', name);
     const input = document.getElementById('username-input');
     if (input) input.value = name;
+};
+
+window.handleLiveAuthStateChange = function(authenticatedUser) {
+    syncLiveSessionIdentity();
+    
+    if (authenticatedUser) {
+        closeLiveAuthModal();
+        
+        if (pendingLiveAction === 'host') {
+            const modal = document.getElementById('session-modal');
+            if (modal) modal.classList.remove('hidden');
+        }
+        
+        if (pendingLiveAction === 'join' && isLive && !socket) {
+            connectSocket();
+        }
+        
+        pendingLiveAction = null;
+        return;
+    }
+    
+    if (socket) {
+        socket.disconnect();
+        socket = null;
+    }
+
+    participants = [];
+    updatePresenceUI();
+    
+    const chatBtn = document.getElementById('chat-btn');
+    if (chatBtn) {
+        chatBtn.classList.add('hidden');
+    }
+    
+    if (isLive) {
+        openLiveAuthModal(
+            'Sign in with Google to join this live session. Chat and collaboration use Google identities so everyone knows who is here.',
+            'join'
+        );
+    }
 };
 
 document.addEventListener('DOMContentLoaded', init);
