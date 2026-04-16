@@ -28,7 +28,7 @@ const io = new Server(server, {
 
 app.use(cors(corsOptions));
 
-app.get("/config.js", (req, res) => {
+function sendRuntimeConfig(res) {
   const firebaseConfig = {
     apiKey: process.env.FIREBASE_API_KEY || "",
     authDomain: process.env.FIREBASE_AUTH_DOMAIN || "",
@@ -48,6 +48,14 @@ app.get("/config.js", (req, res) => {
         backendUrl
       )};`
     );
+}
+
+app.get("/runtime-config.js", (req, res) => {
+  sendRuntimeConfig(res);
+});
+
+app.get("/config.js", (req, res) => {
+  sendRuntimeConfig(res);
 });
 
 app.use(express.static(path.join(__dirname, "../public")));

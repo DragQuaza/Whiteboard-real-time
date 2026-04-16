@@ -6,8 +6,8 @@
   "installCommand": null,
   "outputDirectory": "public",
   "rewrites": [
-    { "source": "/room/(.*)", "destination": "/index.html" },
-    { "source": "/(.*)", "destination": "/$1" }
+    { "source": "/runtime-config.js", "destination": "/api/runtime-config" },
+    { "source": "/room/(.*)", "destination": "/index.html" }
   ],
   "redirects": [
     { "source": "/room", "destination": "/", "permanent": false }
