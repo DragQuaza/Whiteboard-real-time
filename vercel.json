@@ -6,10 +6,24 @@
   "installCommand": null,
   "outputDirectory": "public",
   "rewrites": [
-    { "source": "/runtime-config.js", "destination": "/api/runtime-config" },
-    { "source": "/room/(.*)", "destination": "/index.html" }
+    {
+      "source": "/config.js",
+      "destination": "/api/config.js"
+    },
+    {
+      "source": "/runtime-config.js",
+      "destination": "/api/runtime-config"
+    },
+    {
+      "source": "/room/(.*)",
+      "destination": "/index.html"
+    }
   ],
   "redirects": [
-    { "source": "/room", "destination": "/", "permanent": false }
+    {
+      "source": "/room",
+      "destination": "/",
+      "permanent": false
+    }
   ]
 }
