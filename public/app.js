@@ -1,6 +1,18 @@
-const SERVER_URL = window.BACKEND_URL || (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
-    ? 'http://localhost:5001' 
-    : 'https://whiteboard-real-time-one.onrender.com'); // Default Render URL
+const LOCAL_BACKEND_URL = 'http://localhost:5001';
+
+function normalizeBackendUrl(url) {
+    return typeof url === 'string' ? url.trim().replace(/\/$/, '') : '';
+}
+
+function getServerUrl() {
+    const configuredUrl = normalizeBackendUrl(window.BACKEND_URL);
+    if (configuredUrl) return configuredUrl;
+
+    const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    return isLocal ? LOCAL_BACKEND_URL : window.location.origin;
+}
+
+const SERVER_URL = getServerUrl();
 
 let socket = null;
 let roomId = null;
@@ -21,6 +33,8 @@ let landingInitialized = false;
 let roomInitialized = false;
 let activeRoomLoadRequest = 0;
 let cleanupCanvasTransientUI = () => {};
+let hasShownLiveConnectionError = false;
+let editingTextIndex = null;
 
 const DEFAULT_CANVAS_COLOR = '#131313';
 
@@ -209,9 +223,9 @@ function resetSessionModalState() {
     if (shareLinkContainer) shareLinkContainer.classList.add('hidden');
     if (shareLinkInput) shareLinkInput.value = '';
     if (startBtn) {
+        startBtn.dataset.mode = 'start';
         startBtn.textContent = 'Start';
         startBtn.classList.remove('btn-danger');
-        startBtn.onclick = null;
     }
 
     pendingLiveAction = null;
@@ -236,6 +250,13 @@ function clearRoomState() {
     currentElement = null;
     isDrawing = false;
     canvasColor = DEFAULT_CANVAS_COLOR;
+    syncCanvasColorSelection();
+}
+
+function syncCanvasColorSelection() {
+    document.querySelectorAll('.canvas-color-btn').forEach((button) => {
+        button.classList.toggle('active', button.dataset.canvasColor === canvasColor);
+    });
 }
 
 function navigateTo(path, { replace = false, skipTransition = false } = {}) {
@@ -333,6 +354,7 @@ async function loadRoom() {
     currentElement = null;
     isDrawing = false;
     canvasColor = nextCanvasColor;
+    syncCanvasColorSelection();
     updateCanvas();
 
     if (isLive && requireGoogleSignInForLiveSession('join')) {
@@ -379,10 +401,10 @@ function generateRoomId() {
 }
 
 function initCanvas() {
-        // --- Text selection and movement state ---
-        let selectedTextIndex = null;
-        let isDraggingText = false;
-        let dragOffset = { x: 0, y: 0 };
+    // --- Text selection and movement state ---
+    let selectedTextIndex = null;
+    let isDraggingText = false;
+    let dragOffset = { x: 0, y: 0 };
     const canvas = document.getElementById('board');
     canvas.width = window.innerWidth * 2;
     canvas.height = window.innerHeight * 2;
@@ -400,16 +422,42 @@ function initCanvas() {
     let textBoxActive = false;
     let textBoxPreview = null;
 
-    cleanupCanvasTransientUI = () => {
-        if (textBoxDiv?.parentNode) {
-            textBoxDiv.parentNode.removeChild(textBoxDiv);
-        }
+    function removeTextPreview() {
         if (textBoxPreview?.parentNode) {
             textBoxPreview.parentNode.removeChild(textBoxPreview);
         }
-
-        textBoxDiv = null;
         textBoxPreview = null;
+    }
+
+    function closeTextEditor({ redraw = true } = {}) {
+        if (textBoxDiv?.parentNode) {
+            textBoxDiv.parentNode.removeChild(textBoxDiv);
+        }
+        textBoxDiv = null;
+        editingTextIndex = null;
+
+        if (redraw) {
+            updateCanvas();
+        }
+    }
+
+    function styleTextEditor(editor, { x, y, width, height, font, color }) {
+        const rect = canvas.getBoundingClientRect();
+        editor.className = 'canvas-textarea';
+        editor.style.position = 'absolute';
+        editor.style.left = `${rect.left + x}px`;
+        editor.style.top = `${rect.top + y}px`;
+        editor.style.width = `${Math.max(width, 1)}px`;
+        editor.style.height = `${Math.max(height, 24)}px`;
+        editor.style.font = font || '20px cursive, Comic Sans MS, Manrope, sans-serif';
+        editor.style.color = color || currentColor;
+        editor.style.background = canvasColor;
+        editor.style.zIndex = '3000';
+    }
+
+    cleanupCanvasTransientUI = () => {
+        closeTextEditor({ redraw: false });
+        removeTextPreview();
         textBoxStart = null;
         textBoxActive = false;
         selectedTextIndex = null;
@@ -446,8 +494,8 @@ function initCanvas() {
             // Create preview div
             if (!textBoxPreview) {
                 textBoxPreview = document.createElement('div');
+                textBoxPreview.className = 'canvas-text-preview';
                 textBoxPreview.style.position = 'absolute';
-                textBoxPreview.style.border = '2px dashed #CCFF00';
                 textBoxPreview.style.pointerEvents = 'none';
                 textBoxPreview.style.zIndex = 2999;
                 document.body.appendChild(textBoxPreview);
@@ -475,32 +523,36 @@ function initCanvas() {
     });
 
     function showTextEditOverlay(ele, idx) {
-        // Remove any existing overlay
-        if (textBoxDiv) document.body.removeChild(textBoxDiv);
+        closeTextEditor({ redraw: false });
+        removeTextPreview();
+        textBoxActive = false;
+        textBoxStart = null;
+        editingTextIndex = idx;
+        updateCanvas();
+
         textBoxDiv = document.createElement('textarea');
-        textBoxDiv.style.position = 'absolute';
-        const rect = canvas.getBoundingClientRect();
-        textBoxDiv.style.left = (rect.left + ele.offsetX) + 'px';
-        textBoxDiv.style.top = (rect.top + ele.offsetY) + 'px';
-        textBoxDiv.style.width = ele.width + 'px';
-        textBoxDiv.style.height = ele.height + 'px';
-        textBoxDiv.style.font = ele.font || '20px cursive, Comic Sans MS, Manrope, sans-serif';
-        textBoxDiv.style.color = ele.color || currentColor;
-        textBoxDiv.style.background = canvasColor;
-        textBoxDiv.style.border = '1.5px solid #CCFF00';
-        textBoxDiv.style.zIndex = 3000;
-        textBoxDiv.style.resize = 'none';
-        textBoxDiv.style.padding = '4px';
-        textBoxDiv.style.overflow = 'auto';
+        styleTextEditor(textBoxDiv, {
+            x: ele.offsetX,
+            y: ele.offsetY,
+            width: ele.width,
+            height: ele.height,
+            font: ele.font,
+            color: ele.color || currentColor
+        });
         textBoxDiv.value = ele.text;
         document.body.appendChild(textBoxDiv);
         textBoxDiv.focus();
+        textBoxDiv.setSelectionRange(textBoxDiv.value.length, textBoxDiv.value.length);
+
+        let isClosingEditor = false;
 
         function saveEdit() {
+            if (isClosingEditor || !textBoxDiv) return;
+            isClosingEditor = true;
+
             const value = textBoxDiv.value;
             if (value && value.trim()) {
                 elements[idx].text = value;
-                updateCanvas();
                 if (isLive && socket) {
                     socket.emit('updateCanvas', {
                         roomId: roomId,
@@ -513,14 +565,23 @@ function initCanvas() {
                     window.saveCanvasToFirestore(roomId, elements, canvasColor);
                 }
             }
-            document.body.removeChild(textBoxDiv);
-            textBoxDiv = null;
+            closeTextEditor();
         }
+
+        function cancelEdit() {
+            if (isClosingEditor || !textBoxDiv) return;
+            isClosingEditor = true;
+            closeTextEditor();
+        }
+
         textBoxDiv.addEventListener('blur', saveEdit);
         textBoxDiv.addEventListener('keydown', function(ev) {
             if (ev.key === 'Enter' && !ev.shiftKey) {
                 ev.preventDefault();
                 saveEdit();
+            } else if (ev.key === 'Escape') {
+                ev.preventDefault();
+                cancelEdit();
             }
         });
     }
@@ -577,32 +638,28 @@ function initCanvas() {
             const height = Math.abs(end.y - textBoxStart.y) || 40;
 
             // Remove preview
-            if (textBoxPreview) {
-                document.body.removeChild(textBoxPreview);
-                textBoxPreview = null;
-            }
+            removeTextPreview();
 
             // Create textarea overlay
-            if (textBoxDiv) document.body.removeChild(textBoxDiv);
+            closeTextEditor({ redraw: false });
             textBoxDiv = document.createElement('textarea');
-            textBoxDiv.style.position = 'absolute';
-            const rect = canvas.getBoundingClientRect();
-            textBoxDiv.style.left = (rect.left + x) + 'px';
-            textBoxDiv.style.top = (rect.top + y) + 'px';
-            textBoxDiv.style.width = width + 'px';
-            textBoxDiv.style.height = height + 'px';
-            textBoxDiv.style.font = '20px cursive, Comic Sans MS, Manrope, sans-serif';
-            textBoxDiv.style.color = currentColor;
-            textBoxDiv.style.background = canvasColor;
-            textBoxDiv.style.border = '1.5px solid #CCFF00';
-            textBoxDiv.style.zIndex = 3000;
-            textBoxDiv.style.resize = 'none';
-            textBoxDiv.style.padding = '4px';
-            textBoxDiv.style.overflow = 'auto';
+            styleTextEditor(textBoxDiv, {
+                x,
+                y,
+                width,
+                height,
+                font: '20px cursive, Comic Sans MS, Manrope, sans-serif',
+                color: currentColor
+            });
             document.body.appendChild(textBoxDiv);
             textBoxDiv.focus();
 
+            let isClosingEditor = false;
+
             function saveTextBox() {
+                if (isClosingEditor || !textBoxDiv) return;
+                isClosingEditor = true;
+
                 const value = textBoxDiv.value;
                 if (value && value.trim()) {
                     elements.push({
@@ -628,8 +685,15 @@ function initCanvas() {
                         window.saveCanvasToFirestore(roomId, elements, canvasColor);
                     }
                 }
-                document.body.removeChild(textBoxDiv);
-                textBoxDiv = null;
+                closeTextEditor();
+                textBoxActive = false;
+                textBoxStart = null;
+            }
+
+            function cancelTextBox() {
+                if (isClosingEditor || !textBoxDiv) return;
+                isClosingEditor = true;
+                closeTextEditor();
                 textBoxActive = false;
                 textBoxStart = null;
             }
@@ -639,6 +703,9 @@ function initCanvas() {
                 if (ev.key === 'Enter' && !ev.shiftKey) {
                     ev.preventDefault();
                     saveTextBox();
+                } else if (ev.key === 'Escape') {
+                    ev.preventDefault();
+                    cancelTextBox();
                 }
             });
         }
@@ -857,7 +924,11 @@ function updateCanvas() {
     ctx.fillStyle = canvasColor;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     
-    elements.forEach((ele) => {
+    elements.forEach((ele, index) => {
+        if (ele.element === 'text' && index === editingTextIndex) {
+            return;
+        }
+
         if (ele.element === 'rect') {
             roughCanvas.draw(generator.rectangle(
                 ele.offsetX, ele.offsetY, ele.width, ele.height, {
@@ -1134,9 +1205,8 @@ function initMenu() {
     document.querySelectorAll('.canvas-color-btn').forEach(btn => {
         btn.style.backgroundColor = btn.dataset.canvasColor;
         btn.addEventListener('click', () => {
-            document.querySelectorAll('.canvas-color-btn').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
             canvasColor = btn.dataset.canvasColor;
+            syncCanvasColorSelection();
             updateCanvas();
             if (isLive && socket) {
                 socket.emit('updateCanvas', {
@@ -1145,6 +1215,9 @@ function initMenu() {
                     updatedElements: elements,
                     canvasColor: canvasColor
                 });
+            }
+            if (window.saveCanvasToFirestore && roomId && roomId.trim() !== '') {
+                window.saveCanvasToFirestore(roomId, elements, canvasColor);
             }
         });
     });
@@ -1204,8 +1277,17 @@ function initSessionModal() {
     usernameInput.readOnly = true;
     syncLiveSessionIdentity();
     
+    startBtn.dataset.mode = 'start';
     startBtn.addEventListener('click', () => {
         if (!requireGoogleSignInForLiveSession('host')) return;
+
+        if (startBtn.dataset.mode === 'stop') {
+            isLive = false;
+            disconnectLiveSession();
+            navigateToRoom(roomId, { replace: true, skipTransition: true });
+            return;
+        }
+
         userName = getAuthenticatedUserName() || userName;
         if (!isLive) {
             isLive = true;
@@ -1213,19 +1295,20 @@ function initSessionModal() {
         }
         shareLinkContainer.classList.remove('hidden');
         shareLinkInput.value = `${window.location.origin}/room/${roomId}?live=true`;
+        startBtn.dataset.mode = 'stop';
         startBtn.textContent = 'Stop';
         startBtn.classList.add('btn-danger');
-        startBtn.onclick = () => {
-            isLive = false;
-            disconnectLiveSession();
-            navigateToRoom(roomId, { replace: true, skipTransition: true });
-        };
     });
     
-    copyLinkBtn.addEventListener('click', () => {
+    copyLinkBtn.addEventListener('click', async () => {
         shareLinkInput.select();
-        navigator.clipboard.writeText(shareLinkInput.value);
-        showToast('Copied to Clipboard');
+        try {
+            await navigator.clipboard.writeText(shareLinkInput.value);
+            showToast('Copied to Clipboard');
+        } catch (error) {
+            console.error('Copy failed', error);
+            showToast('Copy failed');
+        }
     });
 }
 
@@ -1277,6 +1360,7 @@ function connectSocket() {
     if (socket) return;
     
     userName = getAuthenticatedUserName() || userName;
+    hasShownLiveConnectionError = false;
     socket = io(SERVER_URL, {
         forceNew: true,
         reconnectionAttempts: Infinity,
@@ -1285,6 +1369,7 @@ function connectSocket() {
     });
 
     socket.on('connect', () => {
+        hasShownLiveConnectionError = false;
         socket.emit('joinRoom', {
             roomId: roomId,
             userName: userName
@@ -1296,7 +1381,20 @@ function connectSocket() {
     socket.on('updateCanvas', (data) => {
         elements = data.updatedElements;
         canvasColor = data.canvasColor;
+        syncCanvasColorSelection();
         updateCanvas();
+    });
+
+    socket.on('connect_error', () => {
+        const chatBtn = document.getElementById('chat-btn');
+        if (chatBtn) {
+            chatBtn.classList.add('hidden');
+        }
+
+        if (!hasShownLiveConnectionError) {
+            hasShownLiveConnectionError = true;
+            showToast('Unable to connect to the live server right now.');
+        }
     });
     
     socket.on('getMessage', (message) => {
@@ -1319,6 +1417,10 @@ function connectSocket() {
     socket.on('disconnect', () => {
         participants = [];
         updatePresenceUI();
+        const chatBtn = document.getElementById('chat-btn');
+        if (chatBtn) {
+            chatBtn.classList.add('hidden');
+        }
     });
 }
 

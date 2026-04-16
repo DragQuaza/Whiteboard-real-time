@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node server/index.js",
     "dev": "nodemon server/index.js",
-    "build": "echo 'No build needed'"
+    "build": "echo 'No build needed'",
+    "verify": "node --check server/index.js && node --check public/app.js && npm run build"
   },
   "dependencies": {
     "cors": "^2.8.5",

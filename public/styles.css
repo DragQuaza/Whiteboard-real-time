@@ -1,10 +1,23 @@
 /* Overlay textarea and preview for text tool */
-.canvas-textarea, .canvas-text-preview {
-    background: none !important;
-    border: none !important;
-    outline: none !important;
-    box-shadow: none !important;
+.canvas-textarea {
+    margin: 0;
+    padding: 0;
+    border: none;
+    outline: 1px solid rgba(204, 255, 0, 0.45);
+    outline-offset: 2px;
+    box-shadow: none;
     resize: none;
+    overflow: hidden;
+    background: #131313;
+    color: #ffffff;
+    line-height: 24px;
+    caret-color: #ccff00;
+}
+
+.canvas-text-preview {
+    border: 1px dashed rgba(204, 255, 0, 0.65);
+    background: rgba(204, 255, 0, 0.08);
+    box-shadow: none;
 }
 * {
     margin: 0;
@@ -304,6 +317,10 @@ h1, h2, h3, h4, .font-headline {
     font-weight: 700;
     letter-spacing: 0.08em;
     text-transform: uppercase;
+}
+
+.presence-pill-icon {
+    font-size: 0.78rem;
 }
 
 .menu-btn {

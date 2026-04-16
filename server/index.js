@@ -4,13 +4,52 @@ const http = require("http");
 const path = require("path");
 const app = express();
 let dotenv = require("dotenv");
-dotenv.config();
+dotenv.config({ path: path.join(__dirname, ".env") });
 
 const server = http.createServer(app);
 const { Server } = require("socket.io");
-const io = new Server(server);
 
-app.use(cors());
+function getAllowedOrigins() {
+  return (process.env.SOCKET_IO_ALLOWED_ORIGINS || "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+}
+
+const allowedOrigins = getAllowedOrigins();
+const corsOptions = {
+  origin: allowedOrigins.length ? allowedOrigins : true,
+  methods: ["GET", "POST"],
+};
+
+const io = new Server(server, {
+  cors: corsOptions,
+});
+
+app.use(cors(corsOptions));
+
+app.get("/config.js", (req, res) => {
+  const firebaseConfig = {
+    apiKey: process.env.FIREBASE_API_KEY || "",
+    authDomain: process.env.FIREBASE_AUTH_DOMAIN || "",
+    projectId: process.env.FIREBASE_PROJECT_ID || "",
+    storageBucket: process.env.FIREBASE_STORAGE_BUCKET || "",
+    messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID || "",
+    appId: process.env.FIREBASE_APP_ID || "",
+    measurementId: process.env.FIREBASE_MEASUREMENT_ID || "",
+  };
+  const backendUrl = process.env.BACKEND_URL || "";
+
+  res
+    .set("Cache-Control", "no-store")
+    .type("application/javascript")
+    .send(
+      `window.__FIREBASE_CONFIG__ = ${JSON.stringify(firebaseConfig)};\nwindow.BACKEND_URL = ${JSON.stringify(
+        backendUrl
+      )};`
+    );
+});
+
 app.use(express.static(path.join(__dirname, "../public")));
 
 app.get("/", (req, res) => {
@@ -19,22 +58,6 @@ app.get("/", (req, res) => {
 
 app.get("/room/:roomId", (req, res) => {
   res.sendFile(path.join(__dirname, "../public/index.html"));
-});
-
-app.get("/config.js", (req, res) => {
-const firebaseConfig = {
-    apiKey: "AIzaSyCyBhtrXehQc5FRI3fmys1hjtABFdMJ6Xs",
-    authDomain: "collaborative-whiteboard-b3f71.firebaseapp.com",
-    projectId: "collaborative-whiteboard-b3f71",
-    storageBucket: "collaborative-whiteboard-b3f71.firebasestorage.app",
-    messagingSenderId: "912560841661",
-    appId: "1:912560841661:web:af6faae1ba4cdf217928d4",
-    measurementId: "G-M9MYCVKT7D"
-  };
-
-  res.type("application/javascript").send(
-    `window.__FIREBASE_CONFIG__ = ${JSON.stringify(firebaseConfig)};`
-  );
 });
 
 let rooms = [];
