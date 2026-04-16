@@ -21,6 +21,22 @@ app.get("/room/:roomId", (req, res) => {
   res.sendFile(path.join(__dirname, "../public/index.html"));
 });
 
+app.get("/config.js", (req, res) => {
+const firebaseConfig = {
+    apiKey: "AIzaSyCyBhtrXehQc5FRI3fmys1hjtABFdMJ6Xs",
+    authDomain: "collaborative-whiteboard-b3f71.firebaseapp.com",
+    projectId: "collaborative-whiteboard-b3f71",
+    storageBucket: "collaborative-whiteboard-b3f71.firebasestorage.app",
+    messagingSenderId: "912560841661",
+    appId: "1:912560841661:web:af6faae1ba4cdf217928d4",
+    measurementId: "G-M9MYCVKT7D"
+  };
+
+  res.type("application/javascript").send(
+    `window.__FIREBASE_CONFIG__ = ${JSON.stringify(firebaseConfig)};`
+  );
+});
+
 let rooms = [];
 const Port = process.env.PORT || 5001;
 

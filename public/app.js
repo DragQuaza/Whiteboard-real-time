@@ -20,6 +20,7 @@ let participants = [];
 let landingInitialized = false;
 let roomInitialized = false;
 let activeRoomLoadRequest = 0;
+let cleanupCanvasTransientUI = () => {};
 
 const DEFAULT_CANVAS_COLOR = '#131313';
 
@@ -42,11 +43,12 @@ function syncLiveSessionIdentity() {
     
     if (authenticatedName) {
         userName = authenticatedName;
+        localStorage.setItem('userName', authenticatedName);
     }
     
     if (!usernameInput) return;
     
-    usernameInput.readOnly = true;
+    usernameInput.readOnly = !authenticatedName;
     usernameInput.value = authenticatedName || 'Sign in with Google to use live sessions';
 }
 
@@ -228,6 +230,7 @@ function setRoomTransitionState(isLoading, message = 'Loading drawing...') {
 }
 
 function clearRoomState() {
+    cleanupCanvasTransientUI();
     elements = [];
     history = [];
     currentElement = null;
@@ -285,6 +288,7 @@ function initLanding() {
     document.getElementById('room-page').classList.add('hidden');
 
     activeRoomLoadRequest++;
+    cleanupCanvasTransientUI();
     roomId = null;
     isLive = false;
     setRoomTransitionState(false);
@@ -302,6 +306,7 @@ async function loadRoom() {
     const requestId = ++activeRoomLoadRequest;
     const nextIsLive = new URLSearchParams(window.location.search).get('live') === 'true';
 
+    cleanupCanvasTransientUI();
     disconnectLiveSession();
     resetSessionModalState();
     isLive = nextIsLive;
@@ -374,6 +379,10 @@ function generateRoomId() {
 }
 
 function initCanvas() {
+        // --- Text selection and movement state ---
+        let selectedTextIndex = null;
+        let isDraggingText = false;
+        let dragOffset = { x: 0, y: 0 };
     const canvas = document.getElementById('board');
     canvas.width = window.innerWidth * 2;
     canvas.height = window.innerHeight * 2;
@@ -386,7 +395,254 @@ function initCanvas() {
     ctx.fillStyle = canvasColor;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     
-    canvas.addEventListener('mousedown', handleMouseDown);
+    let textBoxStart = null;
+    let textBoxDiv = null;
+    let textBoxActive = false;
+    let textBoxPreview = null;
+
+    cleanupCanvasTransientUI = () => {
+        if (textBoxDiv?.parentNode) {
+            textBoxDiv.parentNode.removeChild(textBoxDiv);
+        }
+        if (textBoxPreview?.parentNode) {
+            textBoxPreview.parentNode.removeChild(textBoxPreview);
+        }
+
+        textBoxDiv = null;
+        textBoxPreview = null;
+        textBoxStart = null;
+        textBoxActive = false;
+        selectedTextIndex = null;
+        isDraggingText = false;
+    };
+
+    canvas.addEventListener('mousedown', function(e) {
+        const mouse = getOffset(e, e.target);
+        // Check if clicking on a text element
+        let found = false;
+        for (let i = elements.length - 1; i >= 0; i--) {
+            const ele = elements[i];
+            if (ele.element === 'text') {
+                if (
+                    mouse.x >= ele.offsetX && mouse.x <= ele.offsetX + ele.width &&
+                    mouse.y >= ele.offsetY && mouse.y <= ele.offsetY + ele.height
+                ) {
+                    selectedTextIndex = i;
+                    dragOffset.x = mouse.x - ele.offsetX;
+                    dragOffset.y = mouse.y - ele.offsetY;
+                    isDraggingText = true;
+                    found = true;
+                    break;
+                }
+            }
+        }
+        if (found) {
+            // Do not start new text box, start drag
+            return;
+        }
+        if (currentTool === 'text') {
+            textBoxStart = mouse;
+            textBoxActive = true;
+            // Create preview div
+            if (!textBoxPreview) {
+                textBoxPreview = document.createElement('div');
+                textBoxPreview.style.position = 'absolute';
+                textBoxPreview.style.border = '2px dashed #CCFF00';
+                textBoxPreview.style.pointerEvents = 'none';
+                textBoxPreview.style.zIndex = 2999;
+                document.body.appendChild(textBoxPreview);
+            }
+        } else {
+            handleMouseDown(e);
+        }
+    });
+    // Double click to edit text
+    canvas.addEventListener('dblclick', function(e) {
+        const mouse = getOffset(e, e.target);
+        for (let i = elements.length - 1; i >= 0; i--) {
+            const ele = elements[i];
+            if (ele.element === 'text') {
+                if (
+                    mouse.x >= ele.offsetX && mouse.x <= ele.offsetX + ele.width &&
+                    mouse.y >= ele.offsetY && mouse.y <= ele.offsetY + ele.height
+                ) {
+                    // Show textarea overlay for editing
+                    showTextEditOverlay(ele, i);
+                    break;
+                }
+            }
+        }
+    });
+
+    function showTextEditOverlay(ele, idx) {
+        // Remove any existing overlay
+        if (textBoxDiv) document.body.removeChild(textBoxDiv);
+        textBoxDiv = document.createElement('textarea');
+        textBoxDiv.style.position = 'absolute';
+        const rect = canvas.getBoundingClientRect();
+        textBoxDiv.style.left = (rect.left + ele.offsetX) + 'px';
+        textBoxDiv.style.top = (rect.top + ele.offsetY) + 'px';
+        textBoxDiv.style.width = ele.width + 'px';
+        textBoxDiv.style.height = ele.height + 'px';
+        textBoxDiv.style.font = ele.font || '20px cursive, Comic Sans MS, Manrope, sans-serif';
+        textBoxDiv.style.color = ele.color || currentColor;
+        textBoxDiv.style.background = canvasColor;
+        textBoxDiv.style.border = '1.5px solid #CCFF00';
+        textBoxDiv.style.zIndex = 3000;
+        textBoxDiv.style.resize = 'none';
+        textBoxDiv.style.padding = '4px';
+        textBoxDiv.style.overflow = 'auto';
+        textBoxDiv.value = ele.text;
+        document.body.appendChild(textBoxDiv);
+        textBoxDiv.focus();
+
+        function saveEdit() {
+            const value = textBoxDiv.value;
+            if (value && value.trim()) {
+                elements[idx].text = value;
+                updateCanvas();
+                if (isLive && socket) {
+                    socket.emit('updateCanvas', {
+                        roomId: roomId,
+                        userName: userName,
+                        updatedElements: elements,
+                        canvasColor: canvasColor
+                    });
+                }
+                if (window.saveCanvasToFirestore && roomId && roomId.trim() !== '') {
+                    window.saveCanvasToFirestore(roomId, elements, canvasColor);
+                }
+            }
+            document.body.removeChild(textBoxDiv);
+            textBoxDiv = null;
+        }
+        textBoxDiv.addEventListener('blur', saveEdit);
+        textBoxDiv.addEventListener('keydown', function(ev) {
+            if (ev.key === 'Enter' && !ev.shiftKey) {
+                ev.preventDefault();
+                saveEdit();
+            }
+        });
+    }
+
+    canvas.addEventListener('mousemove', function(e) {
+        const mouse = getOffset(e, e.target);
+        // Drag text
+        if (isDraggingText && selectedTextIndex !== null) {
+            const ele = elements[selectedTextIndex];
+            ele.offsetX = mouse.x - dragOffset.x;
+            ele.offsetY = mouse.y - dragOffset.y;
+            updateCanvas();
+            return;
+        }
+        if (currentTool === 'text' && textBoxActive && textBoxStart && textBoxPreview) {
+            const curr = mouse;
+            const x = Math.min(textBoxStart.x, curr.x);
+            const y = Math.min(textBoxStart.y, curr.y);
+            const width = Math.abs(curr.x - textBoxStart.x) || 1;
+            const height = Math.abs(curr.y - textBoxStart.y) || 1;
+            const rect = canvas.getBoundingClientRect();
+            textBoxPreview.style.left = (rect.left + x) + 'px';
+            textBoxPreview.style.top = (rect.top + y) + 'px';
+            textBoxPreview.style.width = width + 'px';
+            textBoxPreview.style.height = height + 'px';
+            textBoxPreview.style.background = canvasColor;
+        }
+    });
+
+    canvas.addEventListener('mouseup', function(e) {
+        if (isDraggingText && selectedTextIndex !== null) {
+            // Save new position
+            isDraggingText = false;
+            selectedTextIndex = null;
+            updateCanvas();
+            if (isLive && socket) {
+                socket.emit('updateCanvas', {
+                    roomId: roomId,
+                    userName: userName,
+                    updatedElements: elements,
+                    canvasColor: canvasColor
+                });
+            }
+            if (window.saveCanvasToFirestore && roomId && roomId.trim() !== '') {
+                window.saveCanvasToFirestore(roomId, elements, canvasColor);
+            }
+            return;
+        }
+        if (currentTool === 'text' && textBoxActive && textBoxStart) {
+            const end = getOffset(e, e.target);
+            const x = Math.min(textBoxStart.x, end.x);
+            const y = Math.min(textBoxStart.y, end.y);
+            const width = Math.abs(end.x - textBoxStart.x) || 150;
+            const height = Math.abs(end.y - textBoxStart.y) || 40;
+
+            // Remove preview
+            if (textBoxPreview) {
+                document.body.removeChild(textBoxPreview);
+                textBoxPreview = null;
+            }
+
+            // Create textarea overlay
+            if (textBoxDiv) document.body.removeChild(textBoxDiv);
+            textBoxDiv = document.createElement('textarea');
+            textBoxDiv.style.position = 'absolute';
+            const rect = canvas.getBoundingClientRect();
+            textBoxDiv.style.left = (rect.left + x) + 'px';
+            textBoxDiv.style.top = (rect.top + y) + 'px';
+            textBoxDiv.style.width = width + 'px';
+            textBoxDiv.style.height = height + 'px';
+            textBoxDiv.style.font = '20px cursive, Comic Sans MS, Manrope, sans-serif';
+            textBoxDiv.style.color = currentColor;
+            textBoxDiv.style.background = canvasColor;
+            textBoxDiv.style.border = '1.5px solid #CCFF00';
+            textBoxDiv.style.zIndex = 3000;
+            textBoxDiv.style.resize = 'none';
+            textBoxDiv.style.padding = '4px';
+            textBoxDiv.style.overflow = 'auto';
+            document.body.appendChild(textBoxDiv);
+            textBoxDiv.focus();
+
+            function saveTextBox() {
+                const value = textBoxDiv.value;
+                if (value && value.trim()) {
+                    elements.push({
+                        element: 'text',
+                        text: value,
+                        offsetX: x,
+                        offsetY: y,
+                        width,
+                        height,
+                        color: currentColor,
+                        font: '20px cursive, Comic Sans MS, Manrope, sans-serif'
+                    });
+                    updateCanvas();
+                    if (isLive && socket) {
+                        socket.emit('updateCanvas', {
+                            roomId: roomId,
+                            userName: userName,
+                            updatedElements: elements,
+                            canvasColor: canvasColor
+                        });
+                    }
+                    if (window.saveCanvasToFirestore && roomId && roomId.trim() !== '') {
+                        window.saveCanvasToFirestore(roomId, elements, canvasColor);
+                    }
+                }
+                document.body.removeChild(textBoxDiv);
+                textBoxDiv = null;
+                textBoxActive = false;
+                textBoxStart = null;
+            }
+
+            textBoxDiv.addEventListener('blur', saveTextBox);
+            textBoxDiv.addEventListener('keydown', function(ev) {
+                if (ev.key === 'Enter' && !ev.shiftKey) {
+                    ev.preventDefault();
+                    saveTextBox();
+                }
+            });
+        }
+    });
     canvas.addEventListener('mousemove', handleMouseMove);
     canvas.addEventListener('mouseup', handleMouseUp);
     canvas.addEventListener('mouseleave', handleMouseUp);
@@ -505,6 +761,16 @@ function handleMouseDown(e) {
             element: currentTool,
             strokeWidth: strokeWidth > 30 ? strokeWidth : 30
         };
+    } else if (currentTool === 'arrow') {
+        currentElement = {
+            offsetX: x,
+            offsetY: y,
+            width: x,
+            height: y,
+            stroke: currentColor,
+            element: currentTool,
+            strokeWidth: strokeWidth
+        };
     } else {
         currentElement = {
             offsetX: x,
@@ -536,7 +802,7 @@ function handleMouseMove(e) {
     if (currentTool === 'rect') {
         currentElement.width = x - currentElement.offsetX;
         currentElement.height = y - currentElement.offsetY;
-    } else if (currentTool === 'line') {
+    } else if (currentTool === 'line' || currentTool === 'arrow') {
         currentElement.width = x;
         currentElement.height = y;
     } else if (currentTool === 'pencil' || currentTool === 'eraser') {
@@ -608,6 +874,32 @@ function updateCanvas() {
                     strokeWidth: ele.strokeWidth
                 }
             ));
+        } else if (ele.element === 'arrow') {
+            // Draw main line
+            roughCanvas.draw(generator.line(
+                ele.offsetX, ele.offsetY, ele.width, ele.height, {
+                    stroke: ele.stroke,
+                    roughness: 0,
+                    strokeWidth: ele.strokeWidth
+                }
+            ));
+            // Draw arrowhead
+            const angle = Math.atan2(ele.height - ele.offsetY, ele.width - ele.offsetX);
+            const headlen = 24; // length of head in px
+            const tox = ele.width;
+            const toy = ele.height;
+            const fromx = ele.offsetX;
+            const fromy = ele.offsetY;
+            const arrowPoints = [
+                [tox - headlen * Math.cos(angle - Math.PI / 7), toy - headlen * Math.sin(angle - Math.PI / 7)],
+                [tox, toy],
+                [tox - headlen * Math.cos(angle + Math.PI / 7), toy - headlen * Math.sin(angle + Math.PI / 7)]
+            ];
+            roughCanvas.linearPath(arrowPoints, {
+                stroke: ele.stroke,
+                roughness: 0,
+                strokeWidth: ele.strokeWidth
+            });
         } else if (ele.element === 'pencil') {
             roughCanvas.linearPath(ele.path, {
                 stroke: ele.stroke,
@@ -638,6 +930,19 @@ function updateCanvas() {
             if (img.complete) {
                 ctx.drawImage(img, ele.offsetX, ele.offsetY, ele.width, ele.height);
             }
+        } else if (ele.element === 'text') {
+            ctx.save();
+            ctx.font = ele.font || '20px cursive, Comic Sans MS, Manrope, sans-serif';
+            ctx.fillStyle = ele.color || '#fff';
+            ctx.textBaseline = 'top';
+            const lines = (ele.text || '').split('\n');
+            let lineHeight = 24;
+            let y = ele.offsetY;
+            for (let line of lines) {
+                ctx.fillText(line, ele.offsetX, y, ele.width || undefined);
+                y += lineHeight;
+            }
+            ctx.restore();
         }
     });
 }
@@ -647,40 +952,48 @@ function redrawCanvas() {
 }
 
 function initTools() {
-    document.querySelectorAll('.tool-btn[data-tool]').forEach(btn => {
+    const eraserCursor = document.getElementById('eraser-cursor');
+
+    document.querySelectorAll('.tool-btn[data-tool]').forEach((btn) => {
         btn.addEventListener('click', () => {
-            document.querySelectorAll('.tool-btn[data-tool]').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tool-btn[data-tool]').forEach((toolBtn) => {
+                toolBtn.classList.remove('active');
+            });
+
             btn.classList.add('active');
             currentTool = btn.dataset.tool;
-            
-            const eraserCursor = document.getElementById('eraser-cursor');
-            if (currentTool === 'eraser') {
-                eraserCursor.classList.remove('hidden');
-            } else {
-                eraserCursor.classList.add('hidden');
-            }
+
+            if (!eraserCursor) return;
+            eraserCursor.classList.toggle('hidden', currentTool !== 'eraser');
         });
     });
-    
-    document.getElementById('current-color').style.backgroundColor = currentColor;
+
+    if (eraserCursor) {
+        eraserCursor.classList.toggle('hidden', currentTool !== 'eraser');
+    }
 }
 
 function initColorPicker() {
     const colorPreview = document.getElementById('current-color');
     const colorDropdown = document.getElementById('color-picker-dropdown');
     const colorInput = document.getElementById('color-input');
-    
+
+    if (!colorPreview || !colorDropdown || !colorInput) return;
+
+    colorPreview.style.backgroundColor = currentColor;
+    colorInput.value = currentColor;
+
     colorPreview.addEventListener('click', () => {
         colorDropdown.classList.toggle('hidden');
     });
-    
+
     document.addEventListener('click', (e) => {
         if (!e.target.closest('.color-picker-wrapper')) {
             colorDropdown.classList.add('hidden');
         }
     });
-    
-    document.querySelectorAll('.color-btn').forEach(btn => {
+
+    document.querySelectorAll('.color-btn').forEach((btn) => {
         btn.style.backgroundColor = btn.dataset.color;
         btn.addEventListener('click', () => {
             currentColor = btn.dataset.color;
@@ -689,7 +1002,7 @@ function initColorPicker() {
             colorDropdown.classList.add('hidden');
         });
     });
-    
+
     colorInput.addEventListener('input', (e) => {
         currentColor = e.target.value;
         colorPreview.style.backgroundColor = currentColor;
@@ -856,6 +1169,14 @@ function initSessionModal() {
         modal.classList.remove('hidden');
     });
     
+    // Make username editable after Google auth
+    usernameInput.addEventListener('input', (e) => {
+        userName = e.target.value.trim() || getAuthenticatedUserName() || 'Anonymous';
+        localStorage.setItem('userName', userName);
+        const sidebarUserName = document.getElementById('sidebar-user-name');
+        if (sidebarUserName) sidebarUserName.textContent = userName;
+    });
+    
     closeBtn.addEventListener('click', () => {
         modal.classList.add('hidden');
     });
@@ -958,11 +1279,11 @@ function connectSocket() {
     userName = getAuthenticatedUserName() || userName;
     socket = io(SERVER_URL, {
         forceNew: true,
-        reconnectionAttempts: 'Infinity',
+        reconnectionAttempts: Infinity,
         timeout: 10000,
         transports: ['websocket']
     });
-    
+
     socket.on('connect', () => {
         socket.emit('joinRoom', {
             roomId: roomId,
@@ -1124,6 +1445,9 @@ async function loadUserHistory() {
         `;
     }
 }
+
+window.loadUserHistory = loadUserHistory;
+window.renderHistory = renderHistory;
 
 function renderHistory(rooms) {
     const historyList = document.getElementById('history-list');

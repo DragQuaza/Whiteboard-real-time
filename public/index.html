@@ -114,7 +114,7 @@
 <div class="text-3xl font-bold tracking-tighter text-[#E5E2E1] font-headline uppercase">RealTimeBoard</div>
 <div class="hidden md:flex items-center space-x-12">
 <a class="font-headline uppercase tracking-tighter text-[#E5E2E1] hover:text-[#CCFF00] transition-colors duration-300" href="#">Features</a>
-<a class="font-headline uppercase tracking-tighter text-[#CCFF00] border-b-2 border-[#CCFF00] pb-1" href="#">Share board/a>
+<a class="font-headline uppercase tracking-tighter text-[#CCFF00] border-b-2 border-[#CCFF00] pb-1" href="#">Share board</a>
 <a class="font-headline uppercase tracking-tighter text-[#E5E2E1] hover:text-[#CCFF00] transition-colors duration-300" href="#">Cloud Sync</a>
 </div>
 <button id="top-signin-btn" class="font-headline uppercase tracking-tighter text-[#E5E2E1] hover:text-[#CCFF00] transition-colors duration-300 active:scale-95">Sign In</button>
@@ -313,9 +313,11 @@
                 <div class="tools-container">
                     <button class="tool-btn active" data-tool="pencil" title="Pencil"><i class="fas fa-pencil-alt"></i></button>
                     <button class="tool-btn" data-tool="line" title="Line"><i class="fas fa-slash"></i></button>
+                    <button class="tool-btn" data-tool="arrow" title="Arrow"><i class="fas fa-long-arrow-alt-right"></i></button>
                     <button class="tool-btn" data-tool="rect" title="Rectangle"><i class="far fa-square"></i></button>
                     <button class="tool-btn" data-tool="circle" title="Circle"><i class="far fa-circle"></i></button>
                     <button class="tool-btn" data-tool="eraser" title="Eraser"><i class="fas fa-eraser"></i></button>
+                    <button class="tool-btn" data-tool="text" title="Text"><i class="fas fa-font"></i></button>
                     <div class="color-picker-wrapper">
                         <div id="current-color" class="color-preview"></div>
                         <div id="color-picker-dropdown" class="color-dropdown hidden">
@@ -490,28 +492,42 @@
     <div id="toast" class="toast hidden"></div>
 
     <script src="/app.js"></script>
+    <script src="/config.js"></script>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         import { getFirestore, doc, setDoc, getDoc, collection, query, where, orderBy, getDocs, updateDoc, deleteDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-        const firebaseConfig = {
-            apiKey: "",
-            authDomain: "collaborative-whiteboard-b3f71.firebaseapp.com",
-            projectId: "collaborative-whiteboard-b3f71",
-            storageBucket: "collaborative-whiteboard-b3f71.firebasestorage.app",
-            messagingSenderId: "912560841661",
-            appId: "1:912560841661:web:af6faae1ba4cdf217928d4",
-            measurementId: "G-M9MYCVKT7D"
-        };
-        
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
-        const provider = new GoogleAuthProvider();
-
         const topSignInBtn = document.getElementById('top-signin-btn');
         const heroSignInBtn = document.getElementById('firebase-signin-btn');
+        const firebaseConfig = window.__FIREBASE_CONFIG__ || {};
+        const firebaseEnabled = Boolean(
+            firebaseConfig.apiKey &&
+            firebaseConfig.authDomain &&
+            firebaseConfig.projectId &&
+            firebaseConfig.appId
+        );
+
+        let auth = { currentUser: null };
+        let db = null;
+        let provider = null;
+
+        if (firebaseEnabled) {
+            const app = initializeApp(firebaseConfig);
+            auth = getAuth(app);
+            db = getFirestore(app);
+            provider = new GoogleAuthProvider();
+        } else {
+            console.warn('Firebase config is missing. Cloud auth and Firestore features are disabled.');
+            if (heroSignInBtn) {
+                heroSignInBtn.disabled = true;
+                heroSignInBtn.title = 'Firebase config is not set';
+            }
+            if (topSignInBtn) {
+                topSignInBtn.disabled = true;
+                topSignInBtn.title = 'Firebase config is not set';
+            }
+        }
 
         // Firestore helpers
         // Firestore does NOT support nested arrays.
@@ -588,8 +604,29 @@
             });
         }
 
+        function mapRoomsSnapshot(querySnapshot) {
+            const rooms = [];
+            querySnapshot.forEach((roomDoc) => {
+                rooms.push({ id: roomDoc.id, ...roomDoc.data() });
+            });
+            return rooms;
+        }
+
+        function sortRoomsByUpdatedAtDesc(rooms) {
+            return [...rooms].sort((left, right) => {
+                const leftTime = left.updatedAt?.seconds || 0;
+                const rightTime = right.updatedAt?.seconds || 0;
+                return rightTime - leftTime;
+            });
+        }
+
+        function isFirestoreIndexError(error) {
+            return error?.code === 'failed-precondition' ||
+                (typeof error?.message === 'string' && error.message.toLowerCase().includes('index'));
+        }
+
         window.saveCanvasToFirestore = async (roomId, elements, canvasColor) => {
-            if (!roomId || typeof roomId !== 'string' || roomId.trim() === '') return;
+            if (!firebaseEnabled || !db || !roomId || typeof roomId !== 'string' || roomId.trim() === '') return;
 
             // Debounce: wait 1000ms after last call before actually saving to avoid hitting quotas
             if (_saveTimer) clearTimeout(_saveTimer);
@@ -625,7 +662,7 @@
         };
 
         window.getCanvasFromFirestore = async (roomId) => {
-            if (!roomId) return null;
+            if (!firebaseEnabled || !db || !roomId) return null;
             try {
                 const docSnap = await getDoc(doc(db, "rooms", roomId));
                 if (docSnap.exists()) {
@@ -640,30 +677,48 @@
         };
 
         window.getUserRoomsFromFirestore = async () => {
-            if (!auth.currentUser) return [];
-            const q = query(
-                collection(db, "rooms"),
-                where("ownerId", "==", auth.currentUser.uid),
-                orderBy("updatedAt", "desc")
-            );
-            const querySnapshot = await getDocs(q);
-            const rooms = [];
-            querySnapshot.forEach((doc) => {
-                rooms.push({ id: doc.id, ...doc.data() });
-            });
-            return rooms;
+            if (!firebaseEnabled || !auth.currentUser) return [];
+            const roomsCollection = collection(db, "rooms");
+
+            try {
+                const indexedQuery = query(
+                    roomsCollection,
+                    where("ownerId", "==", auth.currentUser.uid),
+                    orderBy("updatedAt", "desc")
+                );
+                const querySnapshot = await getDocs(indexedQuery);
+                return mapRoomsSnapshot(querySnapshot);
+            } catch (error) {
+                if (!isFirestoreIndexError(error)) {
+                    throw error;
+                }
+
+                console.warn("Falling back to client-side history sorting because the Firestore index is unavailable.", error);
+                const fallbackQuery = query(
+                    roomsCollection,
+                    where("ownerId", "==", auth.currentUser.uid)
+                );
+                const querySnapshot = await getDocs(fallbackQuery);
+                return sortRoomsByUpdatedAtDesc(mapRoomsSnapshot(querySnapshot));
+            }
         };
 
         window.updateRoomTitleInFirestore = async (roomId, title) => {
+            if (!firebaseEnabled || !db) return;
             const roomRef = doc(db, "rooms", roomId);
             await updateDoc(roomRef, { title: title, updatedAt: serverTimestamp() });
         };
 
         window.deleteRoomFromFirestore = async (roomId) => {
+            if (!firebaseEnabled || !db) return;
             await deleteDoc(doc(db, "rooms", roomId));
         };
 
         async function handleSignIn() {
+            if (!firebaseEnabled || !provider || !auth) {
+                if (window.showToast) window.showToast('Firebase config is not set yet.');
+                return;
+            }
             try {
                 const result = await signInWithPopup(auth, provider);
                 const identityName = result.user.displayName || result.user.email || 'Authenticated User';
@@ -675,11 +730,15 @@
                 if (window.showToast) window.showToast(`Welcome, ${identityName}!`);
             } catch (error) {
                 console.error("Auth Error", error);
-                if (window.showToast) window.showToast('Sign in failed!');
+                const authMessage = error?.code === 'auth/unauthorized-domain'
+                    ? 'This domain is not authorized in Firebase Auth yet.'
+                    : 'Sign in failed!';
+                if (window.showToast) window.showToast(authMessage);
             }
         }
 
         async function handleSignOut() {
+            if (!firebaseEnabled || !auth) return;
             try {
                 await signOut(auth);
                 if (window.showToast) window.showToast('Signed out successfully.');
@@ -688,45 +747,55 @@
             }
         }
 
-        onAuthStateChanged(auth, (user) => {
-            const sidebarUserName = document.getElementById('sidebar-user-name');
-            if (user) {
-                const identityName = user.displayName || user.email || 'Authenticated User';
-                if (window.setAppUserName) window.setAppUserName(identityName);
-                if (sidebarUserName) sidebarUserName.textContent = identityName;
-                if (window.loadUserHistory) window.loadUserHistory();
-                
-                if (heroSignInBtn) {
-                    heroSignInBtn.innerHTML = '<span class="material-symbols-outlined text-primary">logout</span>Sign Out';
-                    heroSignInBtn.onclick = handleSignOut;
-                }
-                if (topSignInBtn) {
-                    topSignInBtn.textContent = 'Sign Out';
-                    topSignInBtn.onclick = handleSignOut;
-                }
-            } else {
-                if (window.setAppUserName) window.setAppUserName('Anonymous');
-                if (sidebarUserName) sidebarUserName.textContent = 'Guest User';
-                if (window.renderHistory) window.renderHistory([]);
+        if (firebaseEnabled) {
+            onAuthStateChanged(auth, (user) => {
+                const sidebarUserName = document.getElementById('sidebar-user-name');
+                if (user) {
+                    const identityName = user.displayName || user.email || 'Authenticated User';
+                    if (window.setAppUserName) window.setAppUserName(identityName);
+                    if (sidebarUserName) sidebarUserName.textContent = identityName;
+                    if (window.loadUserHistory) window.loadUserHistory();
+                    
+                    if (heroSignInBtn) {
+                        heroSignInBtn.innerHTML = '<span class="material-symbols-outlined text-primary">logout</span>Sign Out';
+                        heroSignInBtn.onclick = handleSignOut;
+                    }
+                    if (topSignInBtn) {
+                        topSignInBtn.textContent = 'Sign Out';
+                        topSignInBtn.onclick = handleSignOut;
+                    }
+                } else {
+                    if (window.setAppUserName) window.setAppUserName('Anonymous');
+                    if (sidebarUserName) sidebarUserName.textContent = 'Guest User';
+                    if (window.renderHistory) window.renderHistory([]);
 
-                if (heroSignInBtn) {
-                    heroSignInBtn.innerHTML = '<span class="material-symbols-outlined text-primary">login</span>Sign In with Google';
-                    heroSignInBtn.onclick = handleSignIn;
+                    if (heroSignInBtn) {
+                        heroSignInBtn.innerHTML = '<span class="material-symbols-outlined text-primary">login</span>Sign In with Google';
+                        heroSignInBtn.onclick = handleSignIn;
+                    }
+                    if (topSignInBtn) {
+                        topSignInBtn.textContent = 'Sign In';
+                        topSignInBtn.onclick = handleSignIn;
+                    }
                 }
-                if (topSignInBtn) {
-                    topSignInBtn.textContent = 'Sign In';
-                    topSignInBtn.onclick = handleSignIn;
+                
+                if (window.handleLiveAuthStateChange) {
+                    window.handleLiveAuthStateChange(user);
                 }
-            }
-            
+            });
+        } else {
+            if (window.setAppUserName) window.setAppUserName('Anonymous');
+            if (window.renderHistory) window.renderHistory([]);
             if (window.handleLiveAuthStateChange) {
-                window.handleLiveAuthStateChange(user);
+                window.handleLiveAuthStateChange(null);
             }
-        });
+        }
 
         window.handleGoogleSignIn = handleSignIn;
-        window.isAuthenticatedUser = () => Boolean(auth.currentUser);
-        window.getAuthenticatedUserName = () => auth.currentUser?.displayName || auth.currentUser?.email || null;
+        window.isAuthenticatedUser = () => Boolean(firebaseEnabled && auth.currentUser);
+        window.getAuthenticatedUserName = () => (firebaseEnabled && auth.currentUser)
+            ? auth.currentUser.displayName || auth.currentUser.email || null
+            : null;
         window.handleSignOut = handleSignOut;
     </script>
 </body>

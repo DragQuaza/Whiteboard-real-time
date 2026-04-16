@@ -22,3 +22,7 @@ build/
 
 # Firebase Cache
 .firebase/
+
+# Local scratch notes
+TODO.md
+.vercel

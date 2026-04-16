@@ -1,3 +1,11 @@
+/* Overlay textarea and preview for text tool */
+.canvas-textarea, .canvas-text-preview {
+    background: none !important;
+    border: none !important;
+    outline: none !important;
+    box-shadow: none !important;
+    resize: none;
+}
 * {
     margin: 0;
     padding: 0;
