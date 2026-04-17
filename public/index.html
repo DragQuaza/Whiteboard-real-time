@@ -222,6 +222,33 @@
             </p>
 </div>
 </section>
+
+<!-- Guestbook Section -->
+<section id="guestbook-section" class="py-24 px-6 md:px-12 bg-surface-container-low text-on-surface">
+    <div class="max-w-4xl mx-auto">
+        <h3 class="font-headline text-4xl font-bold uppercase mb-8 tracking-tight text-[#CCFF00]">Guestbook</h3>
+        <p class="font-body text-on-surface/70 mb-12">Leave a comment below, powered by an embedded SQLite database.</p>
+        
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-12">
+            <!-- Form -->
+            <div>
+                <form id="guestbook-form" class="flex flex-col gap-4">
+                    <input type="text" id="guestbook-name" required placeholder="Your Name" class="bg-surface-container border border-primary/20 p-4 rounded text-on-surface placeholder:text-on-surface/50 focus:border-primary focus:outline-none transition-colors">
+                    <textarea id="guestbook-message" required placeholder="Leave a message..." rows="4" class="bg-surface-container border border-primary/20 p-4 rounded text-on-surface placeholder:text-on-surface/50 focus:border-primary focus:outline-none transition-colors"></textarea>
+                    <button type="submit" class="bg-primary text-[#131313] font-bold uppercase tracking-widest py-4 rounded hover:bg-primary/90 transition-colors">Sign Guestbook</button>
+                    <p id="guestbook-status" class="text-sm hidden"></p>
+                </form>
+            </div>
+            
+            <!-- Entries -->
+            <div id="guestbook-entries" class="flex flex-col gap-4 overflow-y-auto max-h-[300px] pr-4 custom-scrollbar">
+                <!-- Entries will be injected here via JS -->
+                <div class="text-on-surface/50 italic">Loading entries...</div>
+            </div>
+        </div>
+    </div>
+</section>
+
 <!-- Footer -->
 <footer class="bg-[#0E0E0E] flex flex-col md:flex-row justify-between items-center w-full px-12 py-16">
 <div class="mb-8 md:mb-0">

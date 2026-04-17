@@ -58,6 +58,38 @@ app.get("/config.js", (req, res) => {
   sendRuntimeConfig(res);
 });
 
+const sqlite3 = require('sqlite3').verbose();
+const dbPath = path.join(__dirname, 'database.sqlite');
+const db = new sqlite3.Database(dbPath, (err) => {
+  if (err) console.error('Error opening database', err);
+  else {
+    db.run(`CREATE TABLE IF NOT EXISTS guestbook (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      message TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`);
+  }
+});
+
+app.use(express.json());
+
+app.get('/api/guestbook', (req, res) => {
+  db.all(`SELECT name, message, created_at FROM guestbook ORDER BY id DESC LIMIT 10`, [], (err, rows) => {
+    if (err) return res.status(500).json({error: err.message});
+    res.json(rows);
+  });
+});
+
+app.post('/api/guestbook', (req, res) => {
+  const { name, message } = req.body;
+  if (!name || !message) return res.status(400).json({error: 'Name and message required'});
+  db.run(`INSERT INTO guestbook (name, message) VALUES (?, ?)`, [name, message], function(err) {
+    if (err) return res.status(500).json({error: err.message});
+    res.json({ id: this.lastID, name, message });
+  });
+});
+
 app.use(express.static(path.join(__dirname, "../public")));
 
 app.get("/", (req, res) => {

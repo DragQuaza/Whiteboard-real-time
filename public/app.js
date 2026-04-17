@@ -1673,4 +1673,87 @@ window.handleLiveAuthStateChange = function(authenticatedUser) {
     }
 };
 
-document.addEventListener('DOMContentLoaded', init);
+// --- GUESTBOOK LOGIC ---
+function initGuestbook() {
+    const form = document.getElementById('guestbook-form');
+    if (!form) return;
+
+    const entriesContainer = document.getElementById('guestbook-entries');
+    const statusText = document.getElementById('guestbook-status');
+    const nameInput = document.getElementById('guestbook-name');
+    const messageInput = document.getElementById('guestbook-message');
+
+    async function fetchEntries() {
+        try {
+            const response = await fetch(SERVER_URL + '/api/guestbook');
+            if (!response.ok) throw new Error('Failed to fetch');
+            const data = await response.json();
+            
+            if (data.length === 0) {
+                entriesContainer.innerHTML = '<div class="text-on-surface/50 italic">No entries yet. Be the first!</div>';
+                return;
+            }
+
+            entriesContainer.innerHTML = data.map(entry => `
+                <div class="bg-surface-container border border-primary/10 p-4 rounded">
+                    <div class="flex justify-between items-center mb-2">
+                        <span class="font-bold text-primary">${escapeHTML(entry.name)}</span>
+                        <span class="text-xs text-on-surface/50">${new Date(entry.created_at).toLocaleDateString()}</span>
+                    </div>
+                    <p class="text-sm text-on-surface/80 break-words">${escapeHTML(entry.message)}</p>
+                </div>
+            `).join('');
+        } catch (err) {
+            console.error('Guestbook fetch error:', err);
+            entriesContainer.innerHTML = '<div class="text-red-500 italic">Error loading entries.</div>';
+        }
+    }
+
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const name = nameInput.value.trim();
+        const message = messageInput.value.trim();
+        if (!name || !message) return;
+
+        statusText.textContent = 'Submitting...';
+        statusText.classList.remove('hidden', 'text-red-500');
+        statusText.classList.add('text-primary');
+
+        try {
+            const response = await fetch(SERVER_URL + '/api/guestbook', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, message })
+            });
+
+            if (!response.ok) throw new Error('Network response was not ok');
+            
+            nameInput.value = '';
+            messageInput.value = '';
+            statusText.textContent = 'Message posted successfully!';
+            
+            setTimeout(() => {
+                statusText.classList.add('hidden');
+            }, 3000);
+            
+            fetchEntries();
+        } catch (err) {
+            console.error('Guestbook submit error:', err);
+            statusText.textContent = 'Failed to post message. Try again later.';
+            statusText.classList.replace('text-primary', 'text-red-500');
+        }
+    });
+
+    function escapeHTML(str) {
+        let div = document.createElement('div');
+        div.innerText = str;
+        return div.innerHTML;
+    }
+
+    fetchEntries();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    init();
+    initGuestbook();
+});
