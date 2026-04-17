@@ -1,5 +1,7 @@
 # RealTimeBoard
 
+**🚀 Live Production:** [https://realtimeboard-lovat.vercel.app/](https://realtimeboard-lovat.vercel.app/)
+
 RealTimeBoard is a collaborative whiteboard for quick visual brainstorming. It lets people spin up a room, share a link, draw together in real time, chat inside the session, and keep boards synced to Firestore for later access.
 
 Unlike the previous README, this project is not a Next.js app. It is a lightweight static frontend in `public/` served by an Express + Socket.IO backend in `server/`.
@@ -172,10 +174,8 @@ This repo is set up for two production targets:
 
 ### Live Demo
 
-Replace these with your deployed URLs once the services are live:
-
-- Frontend: `https://your-vercel-app.vercel.app`
-- Backend: `https://your-render-service.onrender.com`
+- **Frontend (Vercel):** [https://realtimeboard-lovat.vercel.app/](https://realtimeboard-lovat.vercel.app/)
+- **Backend (Render):** [https://whiteboard-real-time-1.onrender.com](https://whiteboard-real-time-1.onrender.com)
 
 ### Render
 
