@@ -48,7 +48,7 @@ function getAuthenticatedUserName() {
 }
 
 function isAuthenticatedForLiveSession() {
-    return Boolean(window.isAuthenticatedUser && window.isAuthenticatedUser());
+    return true;
 }
 
 function syncLiveSessionIdentity() {
@@ -62,8 +62,10 @@ function syncLiveSessionIdentity() {
     
     if (!usernameInput) return;
     
-    usernameInput.readOnly = !authenticatedName;
-    usernameInput.value = authenticatedName || 'Sign in with Google to use live sessions';
+    usernameInput.readOnly = false;
+    if (usernameInput.value === 'Sign in with Google to use live sessions' || !usernameInput.value) {
+        usernameInput.value = userName || 'Guest';
+    }
 }
 
 function openLiveAuthModal(message, action = 'join') {
@@ -136,16 +138,7 @@ function updatePresenceUI() {
 
 function requireGoogleSignInForLiveSession(action) {
     syncLiveSessionIdentity();
-    if (isAuthenticatedForLiveSession()) {
-        return true;
-    }
-    
-    const message = action === 'host'
-        ? 'Sign in with Google to start a live session. Everyone in chat will appear by their Google identity.'
-        : 'Sign in with Google to join this live session. Chat and collaboration use Google identities so everyone knows who is here.';
-    
-    openLiveAuthModal(message, action);
-    return false;
+    return true;
 }
 
 function isRoomRoute(path = window.location.pathname) {
