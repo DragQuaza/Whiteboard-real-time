@@ -43,4 +43,4 @@ The live app is split to handle WebSockets efficiently:
 - **WebSocket Backend:** Hosted on [Render](https://whiteboard-real-time-1.onrender.com)
 
 ---
-*Built with ❤️ for teams and thinkers.*
+*Built with ❤️ for teams and thinkers by Debanjan Maity.*
