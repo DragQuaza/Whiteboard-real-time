@@ -8,7 +8,7 @@ module.exports = (req, res) => {
     appId: process.env.FIREBASE_APP_ID || "",
     measurementId: process.env.FIREBASE_MEASUREMENT_ID || "",
   };
-  const backendUrl = process.env.BACKEND_URL || "";
+  const backendUrl = process.env.BACKEND_URL || "https://whiteboard-real-time-1.onrender.com";
 
   res.setHeader("Cache-Control", "no-store");
   res.setHeader("Content-Type", "application/javascript");

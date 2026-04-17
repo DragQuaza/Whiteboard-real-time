@@ -13,7 +13,7 @@ export default async function handler(req, res) {
     measurementId: process.env.FIREBASE_MEASUREMENT_ID,
   };
 
-  const backendUrl = process.env.BACKEND_URL || '';
+  const backendUrl = process.env.BACKEND_URL || 'https://whiteboard-real-time-1.onrender.com';
 
   res
     .set('Cache-Control', 'no-store')
