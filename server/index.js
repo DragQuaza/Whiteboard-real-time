@@ -58,36 +58,66 @@ app.get("/config.js", (req, res) => {
   sendRuntimeConfig(res);
 });
 
-const sqlite3 = require('sqlite3').verbose();
-const dbPath = path.join(__dirname, 'database.sqlite');
-const db = new sqlite3.Database(dbPath, (err) => {
-  if (err) console.error('Error opening database', err);
-  else {
-    db.run(`CREATE TABLE IF NOT EXISTS guestbook (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      message TEXT NOT NULL,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )`);
-  }
-});
+const alasql = require('alasql');
+
+alasql("CREATE TABLE IF NOT EXISTS templates (id INT, name STRING, elements_json STRING)");
+
+const count = alasql("SELECT COUNT(*) as c FROM templates")[0].c;
+if (count === 0) {
+    const kanbanJson = JSON.stringify([
+      { element: "rect", offsetX: 100, offsetY: 100, width: 800, height: 600, stroke: "#ffffff", strokeWidth: 2, roughness: 1, id: "k1" },
+      { element: "line", offsetX: 366, offsetY: 100, width: 366, height: 700, stroke: "#ffffff", strokeWidth: 2, roughness: 1, id: "k2" },
+      { element: "line", offsetX: 633, offsetY: 100, width: 633, height: 700, stroke: "#ffffff", strokeWidth: 2, roughness: 1, id: "k3" },
+      { element: "line", offsetX: 100, offsetY: 160, width: 900, height: 160, stroke: "#ffffff", strokeWidth: 2, roughness: 1, id: "k4" }
+    ]);
+    const wireframeJson = JSON.stringify([
+      { element: "rect", offsetX: 400, offsetY: 50, width: 300, height: 600, stroke: "#ffffff", strokeWidth: 2, roughness: 1, id: "w1", radius: 20 },
+      { element: "rect", offsetX: 420, offsetY: 80, width: 260, height: 200, stroke: "#ffffff", strokeWidth: 2, roughness: 1, id: "w2" },
+      { element: "circle", offsetX: 550, offsetY: 600, width: 40, height: 40, stroke: "#ffffff", strokeWidth: 2, roughness: 1, id: "w3" }
+    ]);
+    const mindmapJson = JSON.stringify([
+      { element: "line", offsetX: 500, offsetY: 400, width: 390, height: 260, stroke: "#CCFF00", strokeWidth: 2, roughness: 1, id: "cl1" },
+      { element: "line", offsetX: 500, offsetY: 400, width: 390, height: 500, stroke: "#CCFF00", strokeWidth: 2, roughness: 1, id: "cl2" },
+      { element: "line", offsetX: 720, offsetY: 400, width: 820, height: 260, stroke: "#CCFF00", strokeWidth: 2, roughness: 1, id: "cl3" },
+      { element: "line", offsetX: 720, offsetY: 400, width: 820, height: 500, stroke: "#CCFF00", strokeWidth: 2, roughness: 1, id: "cl4" },
+
+      { element: "rect", offsetX: 500, offsetY: 350, width: 220, height: 100, stroke: "#CCFF00", strokeWidth: 4, roughness: 1, id: "center_rect", radius: 10 },
+
+      { element: "rect", offsetX: 250, offsetY: 240, width: 140, height: 40, stroke: "#CCFF00", strokeWidth: 2, roughness: 1, id: "plan_rect" },
+      
+      { element: "rect", offsetX: 250, offsetY: 480, width: 140, height: 40, stroke: "#CCFF00", strokeWidth: 2, roughness: 1, id: "mark_rect" },
+
+      { element: "rect", offsetX: 820, offsetY: 240, width: 140, height: 40, stroke: "#CCFF00", strokeWidth: 2, roughness: 1, id: "exec_rect" },
+
+      { element: "rect", offsetX: 820, offsetY: 480, width: 160, height: 40, stroke: "#CCFF00", strokeWidth: 2, roughness: 1, id: "risk_rect" },
+
+      { element: "line", offsetX: 250, offsetY: 260, width: 150, height: 210, stroke: "#888888", strokeWidth: 1.5, roughness: 0, id: "pl1" },
+      { element: "line", offsetX: 250, offsetY: 260, width: 150, height: 270, stroke: "#888888", strokeWidth: 1.5, roughness: 0, id: "pl2" },
+      { element: "line", offsetX: 250, offsetY: 260, width: 150, height: 330, stroke: "#888888", strokeWidth: 1.5, roughness: 0, id: "pl3" },
+
+      { element: "rect", offsetX: 50, offsetY: 195, width: 100, height: 30, stroke: "#ffffff", strokeWidth: 1, roughness: 1, id: "pr1" },
+      { element: "rect", offsetX: 50, offsetY: 255, width: 100, height: 30, stroke: "#ffffff", strokeWidth: 1, roughness: 1, id: "pr2" },
+      { element: "rect", offsetX: 50, offsetY: 315, width: 100, height: 30, stroke: "#ffffff", strokeWidth: 1, roughness: 1, id: "pr3" },
+
+      { element: "line", offsetX: 960, offsetY: 260, width: 1060, height: 210, stroke: "#888888", strokeWidth: 1.5, roughness: 0, id: "el1" },
+      { element: "line", offsetX: 960, offsetY: 260, width: 1060, height: 270, stroke: "#888888", strokeWidth: 1.5, roughness: 0, id: "el2" },
+
+      { element: "rect", offsetX: 1060, offsetY: 195, width: 110, height: 30, stroke: "#ffffff", strokeWidth: 1, roughness: 1, id: "er1" },
+      { element: "rect", offsetX: 1060, offsetY: 255, width: 110, height: 30, stroke: "#ffffff", strokeWidth: 1, roughness: 1, id: "er2" }
+    ]);
+
+    alasql("INSERT INTO templates VALUES (1, 'Kanban Board', ?), (2, 'Mobile Wireframe', ?), (3, 'Mind Map', ?)", [kanbanJson, wireframeJson, mindmapJson]);
+}
 
 app.use(express.json());
 
-app.get('/api/guestbook', (req, res) => {
-  db.all(`SELECT name, message, created_at FROM guestbook ORDER BY id DESC LIMIT 10`, [], (err, rows) => {
-    if (err) return res.status(500).json({error: err.message});
+app.get('/api/templates', (req, res) => {
+  try {
+    const rows = alasql('SELECT id, name, elements_json FROM templates ORDER BY id ASC');
     res.json(rows);
-  });
-});
-
-app.post('/api/guestbook', (req, res) => {
-  const { name, message } = req.body;
-  if (!name || !message) return res.status(400).json({error: 'Name and message required'});
-  db.run(`INSERT INTO guestbook (name, message) VALUES (?, ?)`, [name, message], function(err) {
-    if (err) return res.status(500).json({error: err.message});
-    res.json({ id: this.lastID, name, message });
-  });
+  } catch (err) {
+    res.status(500).json({error: err.message});
+  }
 });
 
 app.use(express.static(path.join(__dirname, "../public")));

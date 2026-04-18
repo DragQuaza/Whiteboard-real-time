@@ -35,6 +35,11 @@ let activeRoomLoadRequest = 0;
 let cleanupCanvasTransientUI = () => {};
 let hasShownLiveConnectionError = false;
 let editingTextIndex = null;
+let globalCamera = { x: 0, y: 0, zoom: 1 };
+let selectedShapeIndex = null;
+let isDraggingShape = false;
+let shapeDragOffset = { x: 0, y: 0 };
+let activeResizeHandle = null;
 
 const DEFAULT_CANVAS_COLOR = '#131313';
 
@@ -262,8 +267,12 @@ function navigateTo(path, { replace = false, skipTransition = false } = {}) {
 }
 
 function navigateToRoom(nextRoomId, options = {}) {
-    const search = options.live ? '?live=true' : '';
-    navigateTo(`/room/${nextRoomId}${search}`, options);
+    const searchParams = new URLSearchParams();
+    if (options.live) searchParams.append('live', 'true');
+    if (options.templateId) searchParams.append('template', options.templateId);
+    
+    const searchString = searchParams.toString() ? `?${searchParams.toString()}` : '';
+    navigateTo(`/room/${nextRoomId}${searchString}`, options);
 }
 
 function handleRouteChange({ skipTransition = false } = {}) {
@@ -354,6 +363,26 @@ async function loadRoom() {
         connectSocket();
     }
 
+    // Intercept template querystring on load
+    const templateId = new URLSearchParams(window.location.search).get('template');
+    if (templateId && elements.length === 0) {
+        fetch(SERVER_URL + '/api/templates')
+            .then(res => res.json())
+            .then(data => {
+                const template = data.find(t => t.id == templateId);
+                if (template) {
+                     const rawJson = template.elements_json.replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+                     const newElements = JSON.parse(rawJson);
+                     elements.length = 0;
+                     elements.push(...newElements);
+                     updateCanvas();
+                }
+            }).catch(e => console.error("Could not init template", e));
+        
+        const newUrl = window.location.pathname + (isLive ? '?live=true' : '');
+        window.history.replaceState({}, '', newUrl);
+    }
+
     setRoomTransitionState(false);
 }
 
@@ -438,11 +467,18 @@ function initCanvas() {
         const rect = canvas.getBoundingClientRect();
         editor.className = 'canvas-textarea';
         editor.style.position = 'absolute';
-        editor.style.left = `${rect.left + x}px`;
-        editor.style.top = `${rect.top + y}px`;
-        editor.style.width = `${Math.max(width, 1)}px`;
-        editor.style.height = `${Math.max(height, 24)}px`;
-        editor.style.font = font || '20px cursive, Comic Sans MS, Manrope, sans-serif';
+        
+        const screenX = (x * globalCamera.zoom) + globalCamera.x + rect.left;
+        const screenY = (y * globalCamera.zoom) + globalCamera.y + rect.top;
+        const screenW = width * globalCamera.zoom;
+        const screenH = height * globalCamera.zoom;
+        const scaledFont = 20 * globalCamera.zoom;
+        
+        editor.style.left = `${screenX}px`;
+        editor.style.top = `${screenY}px`;
+        editor.style.width = `${Math.max(screenW, 1)}px`;
+        editor.style.height = `${Math.max(screenH, 24 * globalCamera.zoom)}px`;
+        editor.style.font = `${scaledFont}px cursive, Comic Sans MS, Manrope, sans-serif`;
         editor.style.color = color || currentColor;
         editor.style.background = canvasColor;
         editor.style.zIndex = '3000';
@@ -459,26 +495,41 @@ function initCanvas() {
 
     canvas.addEventListener('mousedown', function(e) {
         const mouse = getOffset(e, e.target);
-        // Check if clicking on a text element
-        let found = false;
-        for (let i = elements.length - 1; i >= 0; i--) {
-            const ele = elements[i];
-            if (ele.element === 'text') {
-                if (
-                    mouse.x >= ele.offsetX && mouse.x <= ele.offsetX + ele.width &&
-                    mouse.y >= ele.offsetY && mouse.y <= ele.offsetY + ele.height
-                ) {
-                    selectedTextIndex = i;
-                    dragOffset.x = mouse.x - ele.offsetX;
-                    dragOffset.y = mouse.y - ele.offsetY;
-                    isDraggingText = true;
+        
+        if (currentTool === 'select') {
+            let found = false;
+            for (let i = elements.length - 1; i >= 0; i--) {
+                const ele = elements[i];
+                let isHit = false;
+                const pad = 10 / globalCamera.zoom;
+                
+                let cx, cy, cw, ch;
+                if (ele.element === 'circle') {
+                    cx = ele.offsetX - ele.width/2; cy = ele.offsetY - ele.height/2; cw = ele.width; ch = ele.height;
+                } else if (ele.element === 'line' || ele.element === 'arrow') {
+                    cx = Math.min(ele.offsetX, ele.width); cy = Math.min(ele.offsetY, ele.height); cw = Math.max(ele.offsetX, ele.width) - cx; ch = Math.max(ele.offsetY, ele.height) - cy;
+                } else {
+                    cx = ele.offsetX; cy = ele.offsetY; cw = ele.width || 0; ch = ele.height || 0;
+                }
+                
+                if (mouse.x >= cx - pad && mouse.x <= cx + cw + pad && mouse.y >= cy - pad && mouse.y <= cy + ch + pad) {
+                    isHit = true;
+                }
+                
+                if (isHit) {
+                    selectedShapeIndex = i;
+                    isDraggingShape = true;
+                    shapeDragOffset.x = mouse.x - ele.offsetX;
+                    shapeDragOffset.y = mouse.y - ele.offsetY;
                     found = true;
+                    updateCanvas();
                     break;
                 }
             }
-        }
-        if (found) {
-            // Do not start new text box, start drag
+            if (!found) {
+                selectedShapeIndex = null;
+                updateCanvas();
+            }
             return;
         }
         if (currentTool === 'text') {
@@ -581,11 +632,20 @@ function initCanvas() {
 
     canvas.addEventListener('mousemove', function(e) {
         const mouse = getOffset(e, e.target);
-        // Drag text
-        if (isDraggingText && selectedTextIndex !== null) {
-            const ele = elements[selectedTextIndex];
-            ele.offsetX = mouse.x - dragOffset.x;
-            ele.offsetY = mouse.y - dragOffset.y;
+        if (currentTool === 'select' && isDraggingShape && selectedShapeIndex !== null) {
+            const ele = elements[selectedShapeIndex];
+            const dx = (mouse.x - shapeDragOffset.x) - ele.offsetX;
+            const dy = (mouse.y - shapeDragOffset.y) - ele.offsetY;
+            ele.offsetX += dx;
+            ele.offsetY += dy;
+            
+            if (ele.element === 'line' || ele.element === 'arrow' || ele.element === 'pencil' || ele.element === 'eraser') {
+               ele.width += dx;
+               ele.height += dy;
+               if (ele.path) {
+                   ele.path = ele.path.map(p => [p[0] + dx, p[1] + dy]);
+               }
+            }
             updateCanvas();
             return;
         }
@@ -596,27 +656,25 @@ function initCanvas() {
             const width = Math.abs(curr.x - textBoxStart.x) || 1;
             const height = Math.abs(curr.y - textBoxStart.y) || 1;
             const rect = canvas.getBoundingClientRect();
-            textBoxPreview.style.left = (rect.left + x) + 'px';
-            textBoxPreview.style.top = (rect.top + y) + 'px';
-            textBoxPreview.style.width = width + 'px';
-            textBoxPreview.style.height = height + 'px';
+            
+            const screenX = (x * globalCamera.zoom) + globalCamera.x + rect.left;
+            const screenY = (y * globalCamera.zoom) + globalCamera.y + rect.top;
+            const screenW = width * globalCamera.zoom;
+            const screenH = height * globalCamera.zoom;
+            
+            textBoxPreview.style.left = screenX + 'px';
+            textBoxPreview.style.top = screenY + 'px';
+            textBoxPreview.style.width = screenW + 'px';
+            textBoxPreview.style.height = screenH + 'px';
             textBoxPreview.style.background = canvasColor;
         }
     });
 
     canvas.addEventListener('mouseup', function(e) {
-        if (isDraggingText && selectedTextIndex !== null) {
-            // Save new position
-            isDraggingText = false;
-            selectedTextIndex = null;
-            updateCanvas();
+        if (currentTool === 'select' && isDraggingShape && selectedShapeIndex !== null) {
+            isDraggingShape = false;
             if (isLive && socket) {
-                socket.emit('updateCanvas', {
-                    roomId: roomId,
-                    userName: userName,
-                    updatedElements: elements,
-                    canvasColor: canvasColor
-                });
+                socket.emit('updateCanvas', { roomId, userName, updatedElements: elements, canvasColor });
             }
             if (window.saveCanvasToFirestore && roomId && roomId.trim() !== '') {
                 window.saveCanvasToFirestore(roomId, elements, canvasColor);
@@ -747,12 +805,42 @@ function initCanvas() {
             if (file.type.startsWith('image/')) {
                 const reader = new FileReader();
                 reader.onload = function(evt) {
-                    addImageToCanvas(evt.target.result, e.offsetX * 2, e.offsetY * 2);
+                    const rect = canvas.getBoundingClientRect();
+                    let rawX = e.clientX - rect.left;
+                    let rawY = e.clientY - rect.top;
+                    // Apply camera inverse
+                    let finalX = (rawX - globalCamera.x) / globalCamera.zoom;
+                    let finalY = (rawY - globalCamera.y) / globalCamera.zoom;
+                    addImageToCanvas(evt.target.result, finalX, finalY);
                 };
                 reader.readAsDataURL(file);
             }
         }
     });
+
+    // Infinite Canvas wheel events
+    canvas.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        if (e.ctrlKey || e.metaKey) {
+            // Zooming
+            const zoomDelta = Math.exp(-e.deltaY * 0.005);
+            const targetZoom = Math.min(Math.max(globalCamera.zoom * zoomDelta, 0.1), 10);
+            
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+            
+            // Adjust camera so zoom anchors on mouse
+            globalCamera.x = mouseX - (mouseX - globalCamera.x) * (targetZoom / globalCamera.zoom);
+            globalCamera.y = mouseY - (mouseY - globalCamera.y) * (targetZoom / globalCamera.zoom);
+            globalCamera.zoom = targetZoom;
+        } else {
+            // Panning
+            globalCamera.x -= e.deltaX;
+            globalCamera.y -= e.deltaY;
+        }
+        updateCanvas();
+    }, { passive: false });
 }
 
 // Helper to add image to canvas and elements
@@ -787,15 +875,17 @@ function addImageToCanvas(dataUrl, x, y) {
 
 function getOffset(e, canvas) {
     const rect = canvas.getBoundingClientRect();
-    if (e.touches) {
-        return {
-            x: e.touches[0].clientX - rect.left,
-            y: e.touches[0].clientY - rect.top
-        };
+    let rawX, rawY;
+    if (e.touches && e.touches.length > 0) {
+        rawX = e.touches[0].clientX - rect.left;
+        rawY = e.touches[0].clientY - rect.top;
+    } else {
+        rawX = e.clientX - rect.left;
+        rawY = e.clientY - rect.top;
     }
     return {
-        x: e.offsetX,
-        y: e.offsetY
+        x: (rawX - globalCamera.x) / globalCamera.zoom,
+        y: (rawY - globalCamera.y) / globalCamera.zoom
     };
 }
 
@@ -911,11 +1001,18 @@ function handleTouchMove(e) {
 
 function updateCanvas() {
     const canvas = document.getElementById('board');
+    if (!canvas) return;
     const ctx = canvas.getContext('2d');
     const roughCanvas = rough.canvas(canvas);
     
+    ctx.resetTransform();
+    ctx.scale(2, 2);
     ctx.fillStyle = canvasColor;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    ctx.save();
+    ctx.translate(globalCamera.x, globalCamera.y);
+    ctx.scale(globalCamera.zoom, globalCamera.zoom);
     
     elements.forEach((ele, index) => {
         if (ele.element === 'text' && index === editingTextIndex) {
@@ -1009,6 +1106,44 @@ function updateCanvas() {
             ctx.restore();
         }
     });
+
+    if (selectedShapeIndex !== null && elements[selectedShapeIndex]) {
+        drawSelectionBox(ctx, elements[selectedShapeIndex]);
+    }
+
+    ctx.restore();
+}
+
+function drawSelectionBox(ctx, ele) {
+    ctx.save();
+    ctx.strokeStyle = '#CCFF00';
+    ctx.lineWidth = 2 / globalCamera.zoom;
+    ctx.setLineDash([5 / globalCamera.zoom, 5 / globalCamera.zoom]);
+
+    let x, y, w, h;
+    if (ele.element === 'circle') {
+        x = ele.offsetX - ele.width / 2;
+        y = ele.offsetY - ele.height / 2;
+        w = ele.width;
+        h = ele.height;
+    } else if (ele.element === 'line') {
+        x = Math.min(ele.offsetX, ele.width);
+        y = Math.min(ele.offsetY, ele.height);
+        w = Math.max(ele.offsetX, ele.width) - x;
+        h = Math.max(ele.offsetY, ele.height) - y;
+    } else {
+        x = ele.offsetX;
+        y = ele.offsetY;
+        w = ele.width || 0;
+        h = ele.height || 0;
+    }
+
+    const padding = 10 / globalCamera.zoom;
+    x -= padding; y -= padding;
+    w += padding * 2; h += padding * 2;
+
+    ctx.strokeRect(x, y, w, h);
+    ctx.restore();
 }
 
 function redrawCanvas() {
@@ -1673,87 +1808,68 @@ window.handleLiveAuthStateChange = function(authenticatedUser) {
     }
 };
 
-// --- GUESTBOOK LOGIC ---
-function initGuestbook() {
-    const form = document.getElementById('guestbook-form');
-    if (!form) return;
+// --- TEMPLATES LOGIC ---
+async function initLandingTemplates() {
+    const listContainer = document.getElementById('landing-templates-container');
+    if (!listContainer) return;
 
-    const entriesContainer = document.getElementById('guestbook-entries');
-    const statusText = document.getElementById('guestbook-status');
-    const nameInput = document.getElementById('guestbook-name');
-    const messageInput = document.getElementById('guestbook-message');
+    try {
+        const response = await fetch(SERVER_URL + '/api/templates');
+        if (!response.ok) throw new Error('Failed to fetch templates');
+        const data = await response.json();
+        
+        if (!data || data.length === 0) {
+            listContainer.innerHTML = '<div class="text-xs text-on-surface/50 italic">No templates found.</div>';
+            return;
+        }
 
-    async function fetchEntries() {
-        try {
-            const response = await fetch(SERVER_URL + '/api/guestbook');
-            if (!response.ok) throw new Error('Failed to fetch');
-            const data = await response.json();
-            
-            if (data.length === 0) {
-                entriesContainer.innerHTML = '<div class="text-on-surface/50 italic">No entries yet. Be the first!</div>';
-                return;
-            }
+        listContainer.innerHTML = data.map(t => {
+            let thumb = '';
+            if (t.name.toLowerCase().includes('kanban')) thumb = '/assets/kanban_thumbnail.png';
+            else if (t.name.toLowerCase().includes('wireframe')) thumb = '/assets/wireframe_thumbnail.png';
+            else if (t.name.toLowerCase().includes('mind')) thumb = '/assets/mindmap_thumbnail.png';
 
-            entriesContainer.innerHTML = data.map(entry => `
-                <div class="bg-surface-container border border-primary/10 p-4 rounded">
-                    <div class="flex justify-between items-center mb-2">
-                        <span class="font-bold text-primary">${escapeHTML(entry.name)}</span>
-                        <span class="text-xs text-on-surface/50">${new Date(entry.created_at).toLocaleDateString()}</span>
-                    </div>
-                    <p class="text-sm text-on-surface/80 break-words">${escapeHTML(entry.message)}</p>
+            return `
+            <div class="landing-template-card cursor-pointer group bg-surface-container border border-primary/10 hover:border-primary/50 transition-all rounded shadow-lg overflow-hidden flex flex-col" data-id="${t.id}">
+                <div class="h-48 w-full bg-surface-container-high overflow-hidden relative">
+                    ${thumb ? `<img src="${thumb}" class="w-full h-full object-cover opacity-80 group-hover:opacity-100 group-hover:scale-105 transition-all duration-500" alt="${escapeHTML(t.name)} preview">` : ''}
+                    <div class="absolute inset-0 bg-gradient-to-t from-surface-container to-transparent opacity-80"></div>
                 </div>
-            `).join('');
-        } catch (err) {
-            console.error('Guestbook fetch error:', err);
-            entriesContainer.innerHTML = '<div class="text-red-500 italic">Error loading entries.</div>';
-        }
-    }
+                <div class="p-6">
+                    <h3 class="font-headline font-bold text-primary uppercase text-lg tracking-widest">${escapeHTML(t.name)}</h3>
+                    <p class="font-body text-sm text-on-surface/60 mt-2">Start a new room with this layout pre-loaded.</p>
+                </div>
+            </div>
+        `}).join('');
 
-    form.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const name = nameInput.value.trim();
-        const message = messageInput.value.trim();
-        if (!name || !message) return;
-
-        statusText.textContent = 'Submitting...';
-        statusText.classList.remove('hidden', 'text-red-500');
-        statusText.classList.add('text-primary');
-
-        try {
-            const response = await fetch(SERVER_URL + '/api/guestbook', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name, message })
+        document.querySelectorAll('.landing-template-card').forEach(card => {
+            card.addEventListener('click', (e) => {
+                const templateId = e.currentTarget.getAttribute('data-id');
+                const newRoomId = Math.random().toString(36).substring(2, 10);
+                // Navigate to room with template querystring
+                navigateToRoom(newRoomId, { live: false, templateId: templateId });
             });
-
-            if (!response.ok) throw new Error('Network response was not ok');
-            
-            nameInput.value = '';
-            messageInput.value = '';
-            statusText.textContent = 'Message posted successfully!';
-            
-            setTimeout(() => {
-                statusText.classList.add('hidden');
-            }, 3000);
-            
-            fetchEntries();
-        } catch (err) {
-            console.error('Guestbook submit error:', err);
-            statusText.textContent = 'Failed to post message. Try again later.';
-            statusText.classList.replace('text-primary', 'text-red-500');
-        }
-    });
+        });
+    } catch (err) {
+        console.error('Error fetching templates:', err);
+        listContainer.innerHTML = '<div class="text-xs text-red-500 italic">Error loading templates. Please try again later.</div>';
+    }
 
     function escapeHTML(str) {
-        let div = document.createElement('div');
-        div.innerText = str;
-        return div.innerHTML;
+        if (!str) return '';
+        return str.replace(/[&<>'"]/g, 
+            tag => ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                "'": '&#39;',
+                '"': '&quot;'
+            }[tag] || tag)
+        );
     }
-
-    fetchEntries();
 }
 
 document.addEventListener('DOMContentLoaded', () => {
     init();
-    initGuestbook();
+    initLandingTemplates();
 });
